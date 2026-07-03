@@ -16,11 +16,13 @@ docker compose run --rm migrate    # apply DB migrations (idempotent)
 docker compose up -d               # bring the stack up
 ```
 
-The same three compose commands are also the update procedure — re-run them to roll out a new image. Back up the DB first:
+Then, on the first deploy:
 
-```bash
-docker compose exec -T postgres pg_dump -U siem -d siem_source_tracker -Fc > backups/pre-update.dump
-```
+1. Wait until the app is online — `docker compose ps` shows the `app` service as `healthy` (the image ships a HEALTHCHECK).
+2. Open `APP_URL` in a browser and follow the initial configuration wizard.
+3. The app restarts when the wizard completes; once it is back online, consider restoring a DB backup from the UI (backups are managed in the app).
+
+The same three compose commands are also the update procedure — re-run them to roll out a new image.
 
 ## Contents
 
