@@ -1,0 +1,7 @@
+# Secrets — never commit (this repo is public).
+# Real prod env (copy example.env → .env and fill in).
+.env
+# Real TLS material for nginx (see nginx/certs/README.md).
+nginx/certs/*.pem
+nginx/certs/*.csr
+nginx/certs/*.key
