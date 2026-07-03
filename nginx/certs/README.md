@@ -1,16 +1,27 @@
-# TLS certificates for nginx
+# TLS certificates for nginx (legacy / manual setups)
 
-`docker-compose.yml` (repo root) mounts this directory read-only into the nginx
-container at `/etc/nginx/certs`. The proxy config (`nginx/conf.d/app.conf`)
-expects exactly two files here:
+**This directory is no longer mounted by `docker-compose.yml`.** The running
+stack gets its certificate from the app's setup wizard: the TLS step writes
+`cert.pem` + `key.pem` into the `proxy_certs` named volume, which nginx mounts
+read-only at `/etc/nginx/certs`. To bring an existing certificate into the
+running stack, copy it into the `app` container and reload nginx:
+
+```bash
+docker compose cp your-fullchain.pem app:/app/tls/cert.pem
+docker compose cp your-privkey.pem  app:/app/tls/key.pem
+docker compose exec nginx nginx -s reload
+```
+
+This directory is kept for **manual setups** that bind-mount `./nginx/certs`
+into nginx themselves, paired with the reference config `nginx/conf.d/app.conf`,
+which expects exactly two files here:
 
 | File            | Contents                                              |
 |-----------------|-------------------------------------------------------|
 | `fullchain.pem` | Server certificate + any intermediate CA chain        |
 | `privkey.pem`   | Private key for that certificate                       |
 
-These files are **not** committed (see `.gitignore`) — they are secrets. Place
-the real certificate issued for your host here on the prod machine.
+These files are **not** committed (see `.gitignore`) — they are secrets.
 
 ## Self-signed pair for testing
 
@@ -28,9 +39,3 @@ untrusted):
 
 It refuses to overwrite existing `.pem` files unless `FORCE=1` is set. Replace
 the pair with a properly issued certificate for production.
-
-Reload nginx after changing certs:
-
-```bash
-docker compose exec nginx nginx -s reload   # from the repo root
-```

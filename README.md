@@ -8,8 +8,7 @@ On the prod host, from a copy of this repo:
 
 ```bash
 cp example.env .env          # fill in APP_SECRET, APP_URL, TARGET_DATE, ...
-# place your TLS cert in nginx/certs/ (fullchain.pem + privkey.pem),
-# or generate a self-signed pair for testing: ./scripts/generate-self-signed.sh
+chmod 600 .env               # it holds secrets — keep it owner-readable only
 
 docker compose pull                # fetch the published image
 docker compose run --rm migrate    # apply DB migrations (idempotent)
@@ -24,6 +23,18 @@ Then, on the first deploy:
 
 The same three compose commands are also the update procedure — re-run them to roll out a new image.
 
+## TLS
+
+Certificates are **not** taken from files in this repo: the wizard's TLS step writes `cert.pem` + `key.pem` into the `proxy_certs` volume shared with nginx (on first boot the app seeds a bootstrap HTTP-only config so the wizard is reachable on port 80 before any cert exists). To use an existing certificate instead, copy it into the running `app` container and reload nginx:
+
+```bash
+docker compose cp your-fullchain.pem app:/app/tls/cert.pem
+docker compose cp your-privkey.pem  app:/app/tls/key.pem
+docker compose exec nginx nginx -s reload
+```
+
+`nginx/certs/` and `scripts/generate-self-signed.sh` are legacy — for manual setups that mount `./nginx/certs` themselves (the shipped compose file does not).
+
 ## Contents
 
 | Path | Purpose |
@@ -31,7 +42,7 @@ The same three compose commands are also the update procedure — re-run them to
 | `docker-compose.yml` | Prod compose stack: nginx → app → postgres / redis / squid |
 | `example.env` | Template for the prod `.env` (`cp example.env .env`) |
 | `nginx/conf.d/app.conf` | Reference nginx reverse-proxy config |
-| `nginx/certs/` | TLS cert location (see its README; `*.pem` are gitignored) |
+| `nginx/certs/` | Legacy TLS cert location for manual setups — not mounted by the compose file (see its README; `*.pem` are gitignored) |
 | `squid/squid.conf` | Egress-proxy config (FR-32) |
 | `scripts/` | **Legacy** scripted deploy — kept for now, see below |
 
