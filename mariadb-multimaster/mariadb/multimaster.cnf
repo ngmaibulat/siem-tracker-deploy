@@ -1,0 +1,19 @@
+# Config shared by both MariaDB nodes below (mariadb-node1, mariadb-node2).
+# Mirrors the canonical config used by the siem-tracker app repo's
+# containers/mariadb-multimaster dev lab (configs/multimaster.cnf there).
+# Per-node settings (server-id, auto-increment-offset) are passed on the
+# command line in docker-compose.yml. auto_increment_increment=2 (paired with
+# offsets 1/2) keeps concurrently auto-incremented PKs from colliding when
+# both nodes accept writes.
+
+[mysqld]
+binlog_format=ROW
+default_storage_engine=InnoDB
+character_set_server=utf8mb4
+collation_server=utf8mb4_unicode_ci
+skip_name_resolve=ON
+log_bin=mariadb-bin
+log_slave_updates=1
+gtid_strict_mode=1
+gtid_domain_id=0
+auto_increment_increment=2

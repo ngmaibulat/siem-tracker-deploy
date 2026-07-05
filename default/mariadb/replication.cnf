@@ -1,0 +1,17 @@
+# Config shared by all three MariaDB nodes below (mariadb-master, mariadb-slave1,
+# mariadb-slave2). Mirrors the canonical config used by the siem-tracker app
+# repo's containers/default dev lab (configs/replication.cnf there). Per-node
+# settings (server-id) are passed on the command line in docker-compose.yml.
+# log_slave_updates is set on every node (not just the slaves) so a slave could
+# itself be chained as a sub-master later without a config change.
+
+[mysqld]
+binlog_format=ROW
+default_storage_engine=InnoDB
+character_set_server=utf8mb4
+collation_server=utf8mb4_unicode_ci
+skip_name_resolve=ON
+log_bin=mariadb-bin
+log_slave_updates=1
+gtid_strict_mode=1
+gtid_domain_id=0

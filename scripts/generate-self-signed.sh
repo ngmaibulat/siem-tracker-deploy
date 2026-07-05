@@ -3,13 +3,14 @@
 # Generate a self-signed TLS certificate for the nginx reverse proxy.
 #
 # NOTE: the primary path is now the setup wizard, which generates cert.pem +
-# key.pem into the proxy_certs volume shared with nginx (see
-# docker-compose.yml in this repo). This script remains for manual/legacy setups that
-# mount ./nginx/certs themselves.
+# key.pem into the proxy_certs volume shared with nginx (see the `default`
+# lab's docker-compose.yml). This script remains for manual/legacy setups
+# that mount ./nginx/certs themselves — the `default` lab only, the sole lab
+# with nginx/TLS.
 #
-# Writes privkey.pem + fullchain.pem into nginx/certs/ at the repo root —
-# the filenames the reference nginx/conf.d/app.conf expects. Both are
-# gitignored (nginx/certs/*.pem) — they're secrets.
+# Writes privkey.pem + fullchain.pem into default/nginx/certs/ — the
+# filenames the reference default/nginx/conf.d/app.conf expects. Both are
+# gitignored (default/nginx/certs/*.pem) — they're secrets.
 #
 # Unlike a bare `-subj "/CN=..."` one-liner, this sets a subjectAltName so modern
 # browsers (and `curl` without -k) accept the cert for localhost. Browsers still
@@ -27,7 +28,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CERT_DIR="$SCRIPT_DIR/../nginx/certs"
+CERT_DIR="$SCRIPT_DIR/../default/nginx/certs"
 mkdir -p "$CERT_DIR"
 KEY_FILE="$CERT_DIR/privkey.pem"
 CERT_FILE="$CERT_DIR/fullchain.pem"

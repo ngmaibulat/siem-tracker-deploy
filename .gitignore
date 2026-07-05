@@ -1,7 +1,15 @@
 # Secrets — never commit (this repo is public).
-# Real prod env (copy example.env → .env and fill in).
+# Real per-lab env (copy example.env → .env in each lab dir and fill in).
 .env
-# Real TLS material for nginx (see nginx/certs/README.md).
-nginx/certs/*.pem
-nginx/certs/*.csr
-nginx/certs/*.key
+default/.env
+mariadb-multimaster/.env
+mariadb-galera/.env
+# Real TLS material for the default lab's nginx (see default/nginx/certs/README.md).
+default/nginx/certs/*.pem
+default/nginx/certs/*.csr
+default/nginx/certs/*.key
+# Galera lab log bind mounts — keep the directories (.gitkeep), not their contents.
+mariadb-galera/data/mariadb-logs/*
+mariadb-galera/data/maxscale-logs/*
+!mariadb-galera/data/mariadb-logs/.gitkeep
+!mariadb-galera/data/maxscale-logs/.gitkeep

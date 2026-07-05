@@ -1,0 +1,170 @@
+# Manual-QA lab: the siem-tracker app running against a 2-node MariaDB
+# circular ("multi-master") replication topology using classic binlog/GTID
+# replication — NOT Galera (see ../mariadb-galera for the certification-based
+# multi-master lab). Mirrors the app repo's containers/mariadb-multimaster dev
+# lab exactly in topology, but every service here is a PULLED registry image
+# (ngmaibulat/usiem-tracker:latest for the app, stock upstream images for
+# everything else) — this file never builds. The app's DATABASE_URL points
+# only at node1; node2 is a replication peer the app never talks to directly.
+# No nginx/squid/TLS in this lab (DB-topology-focused, not prod-shaped) — see
+# ../default for that. Fully independent of the other labs in this repo: own
+# ports, own volumes, own compose project name.
+#
+# Bring up (from this directory):
+#   cp example.env .env && docker compose pull && docker compose run --rm migrate && docker compose up -d
+# App: http://localhost:3004
+name: mariadb-multimaster-lab
+
+services:
+  app:
+    image: ngmaibulat/usiem-tracker:latest
+    container_name: siem-tracker-multimaster-app
+    depends_on:
+      mariadb-node1:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mailhog:
+        condition: service_started
+    ports:
+      - "3004:3000"
+    environment:
+      # mysql:// protocol drives DB_PROVIDER=mariadb automatically
+      # (src/lib/dbProvider.ts in the app repo). No read/write splitting — the
+      # app only ever talks to node1.
+      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
+      # CONTROL_DATABASE_URL is left unset on purpose: the control plane
+      # derives from the same MariaDB backend as siem_source_tracker_control
+      # (created by mariadb/init/01-init.sh), keeping this lab focused on its
+      # own multi-master replication topology, same as the source dev lab.
+      REDIS_URL: redis://redis:6379
+      SMTP_URL: smtp://mailhog:1025?from=noreply@siem-tracker.local
+      APP_SECRET: ${APP_SECRET}
+      APP_URL: http://localhost:3004
+      TARGET_DATE: ${TARGET_DATE:-2026-12-31}
+      # FR-42/43 restore-helper only (pg_restore needs a real Postgres to
+      # stage into) — not wired to CONTROL_DATABASE_URL by default here.
+      RESTORE_PG_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres_password}@postgres:5432/postgres
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    container_name: siem-tracker-multimaster-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: siem-tracker-multimaster-mailhog
+    ports:
+      - "8029:8025"
+    restart: unless-stopped
+
+  # NOTE: node1 and node2 deliberately have NO depends_on relationship between
+  # each other — a mutual `service_healthy` condition would be a dependency
+  # cycle, which Compose rejects. Correctness comes entirely from each node's
+  # own retry loop below, independent of container start order.
+  mariadb-node1:
+    image: mariadb:11.8
+    container_name: siem-tracker-multimaster-node1
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root_password}
+      MARIADB_DATABASE: siem_source_tracker
+      MARIADB_USER: siem
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-siem_password}
+      MARIADB_REPL_PASSWORD: ${MARIADB_REPL_PASSWORD:-repl_password}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        (
+        until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
+        until mariadb -hmariadb-node2 -urepl -p"$$MARIADB_REPL_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
+        mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-node2', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=current_pos; START SLAVE;"
+        ) &
+        exec docker-entrypoint.sh mariadbd --server-id=1 --auto-increment-offset=1
+    ports:
+      - "3336:3306"
+    volumes:
+      - ./mariadb/multimaster.cnf:/etc/mysql/conf.d/multimaster.cnf:ro
+      # Only node1 owns init SQL — node2's schema and its copy of the `repl`
+      # user arrive purely via replication (see mariadb/init/01-init.sh).
+      - ./mariadb/init:/docker-entrypoint-initdb.d:ro
+      - node1_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb -h127.0.0.1 -uroot -p\"$$MARIADB_ROOT_PASSWORD\" -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  mariadb-node2:
+    image: mariadb:11.8
+    container_name: siem-tracker-multimaster-node2
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root_password}
+      MARIADB_REPL_PASSWORD: ${MARIADB_REPL_PASSWORD:-repl_password}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        (
+        until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
+        until mariadb -hmariadb-node1 -urepl -p"$$MARIADB_REPL_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
+        mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-node1', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=current_pos; START SLAVE;"
+        ) &
+        exec docker-entrypoint.sh mariadbd --server-id=2 --auto-increment-offset=2
+    ports:
+      - "3337:3306"
+    volumes:
+      - ./mariadb/multimaster.cnf:/etc/mysql/conf.d/multimaster.cnf:ro
+      - node2_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb -h127.0.0.1 -uroot -p\"$$MARIADB_ROOT_PASSWORD\" -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # FR-42/43 restore-helper: NOT part of the app's normal data path — used only
+  # to stage legacy pg_dump restores (pg_restore's temp database) before
+  # porting the data into the MariaDB target.
+  postgres:
+    image: postgres:18
+    container_name: siem-tracker-multimaster-postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_password}
+    ports:
+      - "5443:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # One-shot schema migration (the app image splits this out of normal
+  # startup — see docker-entrypoint.sh's `migrate` mode). Idempotent.
+  migrate:
+    image: ngmaibulat/usiem-tracker:latest
+    container_name: siem-tracker-multimaster-migrate
+    profiles: ["migrate"]
+    depends_on:
+      mariadb-node1:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
+    command: ["migrate"]
+    restart: "no"
+
+volumes:
+  node1_data:
+  node2_data:
+  postgres_data:
+  redis_data:
