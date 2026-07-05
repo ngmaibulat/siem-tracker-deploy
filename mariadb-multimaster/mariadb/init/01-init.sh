@@ -7,9 +7,9 @@ set -e
 # docker-compose.yml) has already created siem_source_tracker and granted the
 # `siem` user full rights on it. This script adds:
 #
-#   - a control-plane database (CONTROL_DATABASE_URL is left unset in this
-#     lab, so the app derives it from the same MariaDB backend as
-#     <db>_control — this is that database)
+#   - a control-plane database (`<base>_control`, derived from DB_MARIADB_URL
+#     — this lab sets no DB_POSTGRES_URL, so the control plane's containerized
+#     candidate is this same MariaDB backend; this is that database)
 #   - the replication account each node's entrypoint authenticates with
 #     against the OTHER node
 #

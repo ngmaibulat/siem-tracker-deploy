@@ -8,11 +8,10 @@ set -e
 # `siem` user full rights on it. This script adds the two things that
 # bootstrap can't:
 #
-#   - a control-plane database on this server (unused by the app in this
-#     topology — CONTROL_DATABASE_URL points at the companion postgres
-#     service instead — but created so the setup wizard's "use containerized
-#     DB" MariaDB option is available for the control step too, via the
-#     DB_MARIADB_URL hint on the app service)
+#   - a control-plane database on this server (`<base>_control`, derived from
+#     DB_MARIADB_URL — unused unless the wizard is pointed at MariaDB for the
+#     control plane instead of the companion postgres service; created so
+#     that option is available too)
 #   - the replication account each slave's entrypoint authenticates with
 #
 # Replicates down to both slaves automatically once they attach, so they need

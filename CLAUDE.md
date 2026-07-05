@@ -38,7 +38,7 @@ Never run on a lab you care about: `docker compose down -v`, `docker volume rm <
 
 - **Rollback** = re-point `latest` at a previous tag in the registry (`docker buildx imagetools create -t ...:latest ...:<tag>`), then pull + up in the affected lab. Rolling back the image does not roll back migrations.
 - **MariaDB passwords are set-once.** Every lab parameterizes MariaDB/Postgres passwords via `.env`, but the official images only honor them on a *fresh* data volume — changing a password in `.env` later has no effect on an already-initialized volume.
-- **`mysql://` alone decides MariaDB mode.** Every lab's `DATABASE_URL` uses the `mysql://` protocol, which drives the app's `DB_PROVIDER=mariadb` autodetection (`src/lib/dbProvider.ts` in the app repo) — no other flag is needed.
+- **Provider is a wizard choice, not an env mode.** Every lab sets `DB_MARIADB_URL` (and `default` also sets `DB_POSTGRES_URL`) — the only two DB-connection env vars the app reads (see the app repo's CLAUDE.md, Environment section). Neither decides which plane uses which provider at runtime; that's a one-time choice made in the Initial Configuration Wizard and stored in the connection registry. `DB_PROVIDER`/`CONTROL_DB_PROVIDER` on the `app`/`migrate` services only pick the Prisma CLI's own pre-migration target per plane (the CLI can't read the registry, so it needs an explicit flag where the old `mysql://` URL-sniffing used to suffice).
 
 ## Legacy scripted deploy (`scripts/`)
 

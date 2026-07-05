@@ -75,7 +75,7 @@ docker compose down -v   # wipes all three node volumes together and re-bootstra
 
 ## Notes
 
-- `CONTROL_DATABASE_URL` is left unset: the control plane derives from the same MariaDB backend as `siem_source_tracker_control`, keeping this lab focused on its own cluster topology (unlike `../default`, which pins control to a separate Postgres).
+- No `DB_POSTGRES_URL` is set: the control plane, if the wizard assigns it MariaDB, derives from the same backend as `siem_source_tracker_control`, keeping this lab focused on its own cluster topology (unlike `../default`, which offers a separate Postgres candidate).
 - `postgres` is not part of the cluster/routing topology — it exists solely as the FR-42 restore-helper for staging legacy pg_dump restores.
 - The healthcheck on all three nodes uses **root credentials**, not the MariaDB image's built-in `healthcheck.sh`: SST (State Snapshot Transfer, used when a node joins/rejoins) overwrites the joiner's `mysql.user` table with the donor's, orphaning its locally-generated `healthcheck@localhost` password. Root's password is identical cluster-wide and survives SST; a non-synced Galera node also rejects queries, so `SELECT 1` doubles as a synced-check.
 - The `maxscale` monitor/router password is a plain literal in both `maxscale.cnf` and `init/01-init.sh` (not parameterized via `.env` — those files aren't docker-compose `environment:` blocks) — fine for a QA/exploration lab; edit both files together if you need to change it.

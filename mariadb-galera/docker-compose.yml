@@ -2,7 +2,7 @@
 # cluster fronted by MaxScale. Mirrors the app repo's containers/mariadb-galera
 # dev lab exactly in topology, but every service here is a PULLED registry
 # image (ngmaibulat/usiem-tracker:latest for the app, stock upstream images
-# for everything else) — this file never builds. The app's DATABASE_URL
+# for everything else) — this file never builds. The app's DB_MARIADB_URL
 # points at the MaxScale readwritesplit listener, so unlike the other
 # replication labs it isn't pinned to one physical node. No nginx/squid/TLS
 # in this lab (DB-topology-focused, not prod-shaped) — see ../default for
@@ -30,11 +30,12 @@ services:
     ports:
       - "3005:3000"
     environment:
-      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@maxscale:4006/siem_source_tracker
-      # CONTROL_DATABASE_URL is left unset on purpose: the control plane
-      # derives from the same MariaDB backend as siem_source_tracker_control
-      # (created by init/01-init.sh), keeping this lab focused on its own
-      # Galera/MaxScale topology, same as the source dev lab.
+      # The only DB-connection env var this lab sets — no DB_POSTGRES_URL, so
+      # the wizard's "use containerized DB" shortcut is MariaDB-only here,
+      # keeping this lab focused on its own Galera/MaxScale topology, same as
+      # the source dev lab. The control plane, if assigned MariaDB, derives
+      # its own `<base>_control` database (created by init/01-init.sh).
+      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@maxscale:4006/siem_source_tracker
       REDIS_URL: redis://redis:6379
       SMTP_URL: smtp://mailhog:1025?from=noreply@siem-tracker.local
       APP_SECRET: ${APP_SECRET}
@@ -45,8 +46,8 @@ services:
       # mariadb/maxscale services write into.
       MARIADB_LOG_DIR: /app/mariadb-logs
       MAXSCALE_LOG_DIR: /app/maxscale-logs
-      # FR-42/43 restore-helper only (pg_restore needs a real Postgres to
-      # stage into) — not wired to CONTROL_DATABASE_URL by default here.
+      # FR-42 restore-helper only (pg_restore needs a real Postgres to stage
+      # into) — not offered as a DB_POSTGRES_URL wizard candidate by default here.
       RESTORE_PG_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres_password}@postgres:5432/postgres
     volumes:
       - ./data/mariadb-logs:/app/mariadb-logs:ro
@@ -253,7 +254,12 @@ services:
       maxscale:
         condition: service_started
     environment:
-      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@maxscale:4006/siem_source_tracker
+      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@maxscale:4006/siem_source_tracker
+      # CLI-only: the Prisma CLI can't infer mariadb mode from a bare
+      # DB_MARIADB_URL the way it used to sniff a mysql:// DATABASE_URL, so
+      # both planes' provider must be picked explicitly.
+      DB_PROVIDER: mariadb
+      CONTROL_DB_PROVIDER: mariadb
     command: ["migrate"]
     restart: "no"
 

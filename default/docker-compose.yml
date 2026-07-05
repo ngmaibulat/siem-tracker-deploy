@@ -38,21 +38,26 @@
 # See example.env in this folder.
 
 services:
-  # CONTROL plane only in this topology (identity/auth/audit — see
-  # CONTROL_DATABASE_URL on the app/migrate services below). The DOMAIN plane
-  # lives on MariaDB (mariadb-master, below), a live example of the two planes
-  # running on independent providers (FR-43 in the app repo). Also doubles as
-  # the FR-42 restore-helper (RESTORE_PG_URL) for legacy pg_dump restores.
+  # Intended to host the CONTROL plane in this topology (identity/auth/audit —
+  # see DB_PROVIDER/CONTROL_DB_PROVIDER on the app/migrate services below,
+  # which pre-migrate it that way via the Prisma CLI). The DOMAIN plane lives
+  # on MariaDB (mariadb-master, below), a live example of the two planes
+  # running on independent providers (FR-43 in the app repo) — but which plane
+  # actually uses which provider at RUNTIME is a wizard choice, not fixed by
+  # this file (see the app repo's CLAUDE.md, Connection registry section): the
+  # operator just needs to tick "use containerized DB" for each plane's step to
+  # match this topology, or pick something else. Also doubles as the FR-42
+  # restore-helper (RESTORE_PG_URL) for legacy pg_dump restores.
   # NOTE: POSTGRES_DB only takes effect on a fresh/empty postgres_data volume —
   # if this compose file is applied to an ALREADY-INITIALIZED postgres_data
-  # volume that used to hold siem_source_tracker (the pre-MariaDB topology),
-  # this rename has no effect on the existing database; migrate a fresh volume
-  # or rename the DB by hand.
+  # volume from an older release (which used `siem_source_tracker_control` as
+  # the database name), this rename has no effect on the existing database;
+  # migrate a fresh volume or rename the DB by hand.
   postgres:
     image: postgres:18
     container_name: siem-source-tracker-postgres
     environment:
-      POSTGRES_DB: siem_source_tracker_control
+      POSTGRES_DB: siem_source_tracker
       POSTGRES_USER: siem
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siem_password}
     volumes:
@@ -61,14 +66,14 @@ services:
       # warning in DEPLOY.md before bumping this image tag on an existing volume.
       - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U siem -d siem_source_tracker_control"]
+      test: ["CMD-SHELL", "pg_isready -U siem -d siem_source_tracker"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   # DOMAIN plane: classic async (binlog/GTID) MariaDB replication — 1 master +
-  # 2 slaves. The app's DATABASE_URL points only at the master (no
+  # 2 slaves. The app's DB_MARIADB_URL points only at the master (no
   # read/write-split logic); the slaves exist for QA to inspect replication
   # behavior via `docker compose exec mariadb-slave1 ...`. No ports published
   # (unlike the app repo's dev lab, which exposes 3326-3328 for convenience) —
@@ -247,29 +252,19 @@ services:
       mailhog:
         condition: service_started
     environment:
-      # DOMAIN plane on MariaDB (mariadb:// protocol drives DB_PROVIDER=mariadb
-      # automatically, src/lib/dbProvider.ts in the app repo) — the master
-      # only, no read/write splitting.
-      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-master:3306/siem_source_tracker
-      # CONTROL plane fixed to the companion Postgres above (FR-43): its own
-      # protocol (postgresql://) independently decides the control provider,
-      # regardless of the domain plane's mysql:// above. Unlike the previous
-      # all-Postgres topology this is not env-overridable — the whole point of
-      # this topology is domain=MariaDB / control=Postgres on the services
-      # defined in this file; edit the compose file directly for anything else.
-      CONTROL_DATABASE_URL: postgresql://siem:${POSTGRES_PASSWORD:-siem_password}@postgres:5432/siem_source_tracker_control
-      # Setup-wizard-ONLY hints (never read by the running app or Prisma CLI):
-      # generic "here is a reachable Postgres/MariaDB server" candidates so the
-      # control-plane wizard step can offer a "use containerized DB" default
-      # for EITHER provider, not just CONTROL_DATABASE_URL's own (Postgres
-      # above). The MariaDB one points at the siem_source_tracker_control
-      # database that mariadb/init-master/01-init.sh already creates
-      # (otherwise unused).
-      DB_POSTGRES_URL: postgresql://siem:${POSTGRES_PASSWORD:-siem_password}@postgres:5432/siem_source_tracker_control
-      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-master:3306/siem_source_tracker_control
+      # The only two DB-connection env vars the app reads (see the app repo's
+      # CLAUDE.md, Environment section): one reachable Postgres server, one
+      # reachable MariaDB server, each a base database. Neither one alone
+      # decides which plane uses which provider — that's a choice made once,
+      # in the browser, by the Initial Configuration Wizard, and stored in the
+      # connection registry; these vars only seed its "use containerized DB"
+      # shortcut for EITHER plane. They're never read again once a connection
+      # is saved — no plane can be silently overridden by the environment.
+      DB_POSTGRES_URL: postgresql://siem:${POSTGRES_PASSWORD:-siem_password}@postgres:5432/siem_source_tracker
+      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-master:3306/siem_source_tracker
       # FR-42: the companion Postgres also stages legacy pg_dump restores
       # (pg_restore needs a real Postgres) — used solely for that, never for
-      # anything else, now that the domain plane is MariaDB.
+      # anything else.
       RESTORE_PG_URL: postgresql://siem:${POSTGRES_PASSWORD:-siem_password}@postgres:5432/postgres
       # Optional cache (Redis). Remove to run without it — the app degrades to
       # direct DB reads.
@@ -385,11 +380,18 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # Same domain (MariaDB) + control (Postgres) connections the app uses
-      # (see the `app` service) — prisma.config.ts picks the mysql schema/
-      # migration tree automatically from the mysql:// protocol.
-      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-master:3306/siem_source_tracker
-      CONTROL_DATABASE_URL: postgresql://siem:${POSTGRES_PASSWORD:-siem_password}@postgres:5432/siem_source_tracker_control
+      # Same base connections the app uses (see the `app` service) — the
+      # Prisma CLI (out-of-process, can't read the connection registry) needs
+      # an explicit provider selection per plane: DB_PROVIDER picks
+      # DB_MARIADB_URL for the domain plane's migrations, CONTROL_DB_PROVIDER
+      # picks DB_POSTGRES_URL (deriving the `control` schema within it) for
+      # the control plane's — giving this stack's intended domain=MariaDB /
+      # control=Postgres topology, independent of whatever the wizard actually
+      # assigns at runtime.
+      DB_POSTGRES_URL: postgresql://siem:${POSTGRES_PASSWORD:-siem_password}@postgres:5432/siem_source_tracker
+      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-master:3306/siem_source_tracker
+      DB_PROVIDER: mariadb
+      CONTROL_DB_PROVIDER: postgres
     command: ["migrate"]
     restart: "no"
 

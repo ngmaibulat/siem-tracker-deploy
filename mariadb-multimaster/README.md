@@ -19,10 +19,10 @@ App: http://localhost:3004 — follow the initial configuration wizard on first 
 ## Topology
 
 ```
-app (DATABASE_URL) ──► mariadb-node1 ◄──circular replication──► mariadb-node2
+app (DB_MARIADB_URL) ──► mariadb-node1 ◄──circular replication──► mariadb-node2
 ```
 
-The app's `DATABASE_URL` points only at `mariadb-node1`; `mariadb-node2` is a replication peer the app never talks to directly. Each node independently retries a `CHANGE MASTER TO` against the *other* node on startup (no `depends_on` between them — that would be a dependency cycle) — correctness comes from the retry loop, not container start order.
+The app's `DB_MARIADB_URL` points only at `mariadb-node1`; `mariadb-node2` is a replication peer the app never talks to directly. Each node independently retries a `CHANGE MASTER TO` against the *other* node on startup (no `depends_on` between them — that would be a dependency cycle) — correctness comes from the retry loop, not container start order.
 
 ## Verify replication
 
@@ -46,6 +46,6 @@ And the reverse direction (insert on node2, read from node1) to confirm both dir
 
 ## Notes
 
-- `CONTROL_DATABASE_URL` is left unset: the control plane derives from the same MariaDB backend as `siem_source_tracker_control`, keeping this lab focused on its own replication topology (unlike `../default`, which pins control to a separate Postgres).
+- No `DB_POSTGRES_URL` is set: the control plane, if the wizard assigns it MariaDB, derives from the same backend as `siem_source_tracker_control`, keeping this lab focused on its own replication topology (unlike `../default`, which offers a separate Postgres candidate).
 - `postgres` is not part of the replication topology — it exists solely as the FR-42 restore-helper for staging legacy pg_dump restores.
 - Passwords are parameterized via `.env` (see `example.env`) but default to the same values as the app repo's dev lab, so behavior is unchanged out of the box.

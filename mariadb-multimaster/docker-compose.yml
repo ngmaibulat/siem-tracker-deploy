@@ -4,7 +4,7 @@
 # multi-master lab). Mirrors the app repo's containers/mariadb-multimaster dev
 # lab exactly in topology, but every service here is a PULLED registry image
 # (ngmaibulat/usiem-tracker:latest for the app, stock upstream images for
-# everything else) — this file never builds. The app's DATABASE_URL points
+# everything else) — this file never builds. The app's DB_MARIADB_URL points
 # only at node1; node2 is a replication peer the app never talks to directly.
 # No nginx/squid/TLS in this lab (DB-topology-focused, not prod-shaped) — see
 # ../default for that. Fully independent of the other labs in this repo: own
@@ -31,21 +31,20 @@ services:
     ports:
       - "3004:3000"
     environment:
-      # mysql:// protocol drives DB_PROVIDER=mariadb automatically
-      # (src/lib/dbProvider.ts in the app repo). No read/write splitting — the
-      # app only ever talks to node1.
-      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
-      # CONTROL_DATABASE_URL is left unset on purpose: the control plane
-      # derives from the same MariaDB backend as siem_source_tracker_control
-      # (created by mariadb/init/01-init.sh), keeping this lab focused on its
-      # own multi-master replication topology, same as the source dev lab.
+      # The only DB-connection env var this lab sets — no DB_POSTGRES_URL, so
+      # the wizard's "use containerized DB" shortcut is MariaDB-only here,
+      # keeping this lab focused on its own multi-master replication topology,
+      # same as the source dev lab. No read/write splitting — the app only
+      # ever talks to node1. The control plane, if assigned MariaDB, derives
+      # its own `<base>_control` database (created by mariadb/init/01-init.sh).
+      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
       REDIS_URL: redis://redis:6379
       SMTP_URL: smtp://mailhog:1025?from=noreply@siem-tracker.local
       APP_SECRET: ${APP_SECRET}
       APP_URL: http://localhost:3004
       TARGET_DATE: ${TARGET_DATE:-2026-12-31}
-      # FR-42/43 restore-helper only (pg_restore needs a real Postgres to
-      # stage into) — not wired to CONTROL_DATABASE_URL by default here.
+      # FR-42 restore-helper only (pg_restore needs a real Postgres to stage
+      # into) — not offered as a DB_POSTGRES_URL wizard candidate by default here.
       RESTORE_PG_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres_password}@postgres:5432/postgres
     restart: unless-stopped
 
@@ -159,7 +158,12 @@ services:
       mariadb-node1:
         condition: service_healthy
     environment:
-      DATABASE_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
+      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
+      # CLI-only: the Prisma CLI can't infer mariadb mode from a bare
+      # DB_MARIADB_URL the way it used to sniff a mysql:// DATABASE_URL, so
+      # both planes' provider must be picked explicitly.
+      DB_PROVIDER: mariadb
+      CONTROL_DB_PROVIDER: mariadb
     command: ["migrate"]
     restart: "no"
 
