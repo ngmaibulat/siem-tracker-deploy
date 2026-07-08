@@ -318,7 +318,7 @@ docker compose config | grep build
 В корне проекта есть файл `.dockerignore` (в git) — отдельно создавать его не
 нужно, актуальное содержимое всегда смотрите в репозитории. Он, в частности:
 
-- исключает `node_modules`, `.next`, `.git`, `.env`/`.env.*` (шаблон
+- исключает `node_modules`, `.svelte-kit`, `apps/sveltekit/build`, `.git`, `.env`/`.env.*` (шаблон
   `example.env` под них не попадает и остаётся в контексте), бэкапы/архивы, каталог `data` (SQLite-реестр с секретами), корневые
   `docker-compose*.yml` из build-контекста (prod-стек — compose + `nginx/` +
   сертификаты + deploy-скрипты — теперь живет в отдельном репозитории
