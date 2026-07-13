@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Production / manual-QA **deployment stack** for the SIEM Source Onboarding Tracker, organized as several independent **labs** — mirroring the app repo's `containers/` directory (`containers/default`, `containers/mariadb-multimaster`, `containers/mariadb-galera`) — but with every service in every lab a **pulled registry image**, never built from source: the app always runs the published public image `ngmaibulat/usiem-tracker:latest` (versioned `vX.Y.Z` / timestamp tags exist for rollback), and every dependency (MariaDB, Postgres, Redis, MailHog, Squid, MaxScale, Meilisearch) is a stock upstream image. There is no application code, no package manager, no test suite.
+Production / manual-QA **deployment stack** for the SIEM Source Onboarding Tracker, organized as several independent **labs** — mirroring the app repo's `containers/` directory (`containers/default`, `containers/mariadb-multimaster`, `containers/mariadb-galera`) — but with every service in every lab a **pulled registry image**, never built from source: the app always runs the published public image `ngmaibulat/usiem-tracker:latest` (versioned `vX.Y.Z` / timestamp tags exist for rollback), and every dependency (MariaDB, Postgres, Redis, MailHog, Squid, Meilisearch) is a stock upstream image (MariaDB currently pre-GA: `quay.io/mariadb-foundation/mariadb-devel:13.1-preview` in `default`/`mariadb-multimaster` — 13.1 has no official Docker Hub tag yet — and `mariadb:13.0.1-rc` in `mariadb-galera`, the closest 13.x whose image ships a working Galera provider; re-pin everything to `mariadb:13.1.x` on GA). There is no application code, no package manager, no test suite.
 
 Each lab is a **fully self-contained Compose project** in its own subdirectory — own `docker-compose.yml`, own `example.env`, own README, own DB config/init files, own compose project name and host ports — but every lab's nginx binds host 80/443 (the only web entry point in every lab; the app publishes no ports), so only one lab can be up at a time. All other published ports stay distinct per lab. `cd` into a lab before running any `docker compose` command; there is no root-level compose file.
 
@@ -12,7 +12,7 @@ Each lab is a **fully self-contained Compose project** in its own subdirectory �
 |---|---|---|---|
 | [`default/`](default/README.md) | `containers/default` | nginx (TLS) → app → MariaDB master+2 slaves (domain) + Postgres (control) + Redis + MailHog + Squid | 80, 443, 8025 |
 | [`mariadb-multimaster/`](mariadb-multimaster/README.md) | `containers/mariadb-multimaster` | nginx (TLS) → app → 2-node circular MariaDB replication (binlog/GTID) + Postgres (restore-helper only) | 80, 443, 3336-3337, 5443, 8029 |
-| [`mariadb-galera/`](mariadb-galera/README.md) | `containers/mariadb-galera` | nginx (TLS) → app → MaxScale → 3-node Galera cluster + Postgres (restore-helper only) | 80, 443, 3346-3348, 14006, 18989, 5445, 8030 |
+| [`mariadb-galera/`](mariadb-galera/README.md) | `containers/mariadb-galera` | nginx (TLS) → app → 3-node Galera cluster + Postgres (restore-helper only) | 80, 443, 3346-3348, 5445, 8030 |
 
 `default/` is the only fully prod-shaped lab (squid egress proxy, Meilisearch, control plane pinned to a separate Postgres). The other two are DB-topology-focused QA/exploration labs (control plane derives from the same MariaDB backend); like every lab they front the app with their own nginx on 80/443 (wizard-generated config/TLS, app unpublished) — see each lab's own README for full detail, architecture notes, and gotchas specific to it.
 
@@ -30,7 +30,7 @@ docker compose run --rm migrate    # one-shot Prisma migrations, idempotent (pro
 docker compose up -d               # bring the stack up
 ```
 
-The same three commands are both first deploy and update procedure. On schema changes, always `migrate` **before** `up -d`. See each lab's README for lab-specific verify/bring-up notes (e.g. `mariadb-galera` needs `mkdir -p data/mariadb-logs data/maxscale-logs` first, and its `migrate` may need a retry if run before the cluster settles).
+The same three commands are both first deploy and update procedure. On schema changes, always `migrate` **before** `up -d`. See each lab's README for lab-specific verify/bring-up notes (e.g. `mariadb-galera` needs `mkdir -p data/mariadb-logs` first, and its `migrate` may need a retry if run before the cluster settles).
 
 Never run on a lab you care about: `docker compose down -v`, `docker volume rm <project>_*_data`, `docker system prune --volumes` — these destroy the database.
 

@@ -21,7 +21,8 @@ wsrep_cluster_name=siem-galera
 wsrep_cluster_address=gcomm://mariadb-node1,mariadb-node2,mariadb-node3
 wsrep_sst_method=rsync
 # Read causality: a read waits until the node has applied all write-sets seen
-# by the cluster at read time, so MaxScale's readwritesplit can route reads to
-# any node without read-your-writes anomalies. This is the standard Galera
-# answer to "create → redirect → read misses the row"; costs some read latency.
+# by the cluster at read time, so reads against ANY node (the app talks only
+# to node1, but node2/3 are published on host ports for manual QA) never hit
+# read-your-writes anomalies. This is the standard Galera answer to
+# "create → redirect → read misses the row"; costs some read latency.
 wsrep_sync_wait=1

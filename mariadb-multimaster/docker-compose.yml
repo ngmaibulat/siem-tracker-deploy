@@ -103,11 +103,21 @@ services:
   # NOTE: node1 and node2 deliberately have NO depends_on relationship between
   # each other — a mutual `service_healthy` condition would be a dependency
   # cycle, which Compose rejects. Correctness comes entirely from each node's
-  # own retry loop below, independent of container start order.
+  # own retry loop below, independent of container start order. The loop
+  # re-issues CHANGE MASTER/START SLAVE until BOTH slave threads report
+  # Running: on a fresh install a node can request its own GTIDs from a peer
+  # that hasn't replicated them yet (IO error 1236, e.g. node1 after `migrate`
+  # ran against it before node2 caught up), and START SLAVE never retries
+  # that by itself.
   mariadb-node1:
-    image: mariadb:11.8
+    # 13.1 is preview-only (no GA / official Docker Hub tag yet) — pulled from
+    # the MariaDB Foundation's devel registry; re-pin to `mariadb:13.1.x` on GA.
+    image: quay.io/mariadb-foundation/mariadb-devel:13.1-preview
     container_name: siem-tracker-multimaster-node1
     environment:
+      # Upgrade system tables in place when the volume was initialized by an
+      # older major version (no-op on fresh volumes).
+      MARIADB_AUTO_UPGRADE: "1"
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root_password}
       MARIADB_DATABASE: siem_source_tracker
       MARIADB_USER: siem
@@ -120,7 +130,10 @@ services:
         (
         until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
         until mariadb -hmariadb-node2 -urepl -p"$$MARIADB_REPL_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
-        mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-node2', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=current_pos; START SLAVE;"
+        until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-node2', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=current_pos; START SLAVE;" &&
+        sleep 3 &&
+        [ "$$(mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SHOW SLAVE STATUS\G' 2>/dev/null | grep -Ec 'Slave_(IO|SQL)_Running: Yes')" = 2 ];
+        do sleep 5; done
         ) &
         exec docker-entrypoint.sh mariadbd --server-id=1 --auto-increment-offset=1
     ports:
@@ -139,9 +152,10 @@ services:
     restart: unless-stopped
 
   mariadb-node2:
-    image: mariadb:11.8
+    image: quay.io/mariadb-foundation/mariadb-devel:13.1-preview
     container_name: siem-tracker-multimaster-node2
     environment:
+      MARIADB_AUTO_UPGRADE: "1"
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root_password}
       MARIADB_REPL_PASSWORD: ${MARIADB_REPL_PASSWORD:-repl_password}
     entrypoint:
@@ -151,7 +165,10 @@ services:
         (
         until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
         until mariadb -hmariadb-node1 -urepl -p"$$MARIADB_REPL_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
-        mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-node1', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=current_pos; START SLAVE;"
+        until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-node1', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=current_pos; START SLAVE;" &&
+        sleep 3 &&
+        [ "$$(mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SHOW SLAVE STATUS\G' 2>/dev/null | grep -Ec 'Slave_(IO|SQL)_Running: Yes')" = 2 ];
+        do sleep 5; done
         ) &
         exec docker-entrypoint.sh mariadbd --server-id=2 --auto-increment-offset=2
     ports:

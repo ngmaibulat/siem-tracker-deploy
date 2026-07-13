@@ -80,9 +80,14 @@ services:
   # this repo's convention is that only nginx is reachable from outside the
   # compose network.
   mariadb-master:
-    image: mariadb:11.8
+    # 13.1 is preview-only (no GA / official Docker Hub tag yet) — pulled from
+    # the MariaDB Foundation's devel registry; re-pin to `mariadb:13.1.x` on GA.
+    image: quay.io/mariadb-foundation/mariadb-devel:13.1-preview
     container_name: siem-source-tracker-mariadb-master
     environment:
+      # Upgrade system tables in place when the volume was initialized by an
+      # older major version (no-op on fresh volumes).
+      MARIADB_AUTO_UPGRADE: "1"
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-mariadb_root_password}
       MARIADB_DATABASE: siem_source_tracker
       MARIADB_USER: siem
@@ -106,13 +111,17 @@ services:
   # Replication wiring below is a SHELL command in the entrypoint, not SQL —
   # docker-entrypoint-initdb.d only runs once, before the master is reachable
   # over the network, and never reruns on a plain restart. The backgrounded
-  # subshell instead retries until the master is actually usable and then
-  # issues CHANGE MASTER TO — safe/idempotent to rerun on every container
-  # start since GTID position persists in the volume.
+  # subshell instead retries until the master is actually usable, then
+  # re-issues CHANGE MASTER TO / START SLAVE until BOTH slave threads report
+  # Running (START SLAVE can fail without its own retry, e.g. IO error 1236
+  # when the master's binlog doesn't hold the requested GTID yet) —
+  # safe/idempotent to rerun on every container start since GTID position
+  # persists in the volume.
   mariadb-slave1:
-    image: mariadb:11.8
+    image: quay.io/mariadb-foundation/mariadb-devel:13.1-preview
     container_name: siem-source-tracker-mariadb-slave1
     environment:
+      MARIADB_AUTO_UPGRADE: "1"
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-mariadb_root_password}
       MARIADB_REPL_PASSWORD: ${MARIADB_REPL_PASSWORD:-repl_password}
     depends_on:
@@ -125,7 +134,10 @@ services:
         (
         until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
         until mariadb -hmariadb-master -urepl -p"$$MARIADB_REPL_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
-        mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-master', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=slave_pos; START SLAVE;"
+        until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-master', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=slave_pos; START SLAVE;" &&
+        sleep 3 &&
+        [ "$$(mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SHOW SLAVE STATUS\G' 2>/dev/null | grep -Ec 'Slave_(IO|SQL)_Running: Yes')" = 2 ];
+        do sleep 5; done
         ) &
         exec docker-entrypoint.sh mariadbd --server-id=2
     volumes:
@@ -139,9 +151,10 @@ services:
     restart: unless-stopped
 
   mariadb-slave2:
-    image: mariadb:11.8
+    image: quay.io/mariadb-foundation/mariadb-devel:13.1-preview
     container_name: siem-source-tracker-mariadb-slave2
     environment:
+      MARIADB_AUTO_UPGRADE: "1"
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-mariadb_root_password}
       MARIADB_REPL_PASSWORD: ${MARIADB_REPL_PASSWORD:-repl_password}
     depends_on:
@@ -154,7 +167,10 @@ services:
         (
         until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
         until mariadb -hmariadb-master -urepl -p"$$MARIADB_REPL_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
-        mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-master', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=slave_pos; START SLAVE;"
+        until mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "STOP SLAVE; CHANGE MASTER TO MASTER_HOST='mariadb-master', MASTER_USER='repl', MASTER_PASSWORD='$$MARIADB_REPL_PASSWORD', MASTER_USE_GTID=slave_pos; START SLAVE;" &&
+        sleep 3 &&
+        [ "$$(mariadb -h127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e 'SHOW SLAVE STATUS\G' 2>/dev/null | grep -Ec 'Slave_(IO|SQL)_Running: Yes')" = 2 ];
+        do sleep 5; done
         ) &
         exec docker-entrypoint.sh mariadbd --server-id=3
     volumes:

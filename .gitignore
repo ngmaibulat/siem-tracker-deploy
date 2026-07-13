@@ -8,8 +8,6 @@ mariadb-galera/.env
 default/nginx/certs/*.pem
 default/nginx/certs/*.csr
 default/nginx/certs/*.key
-# Galera lab log bind mounts — keep the directories (.gitkeep), not their contents.
+# Galera lab log bind mount — keep the directory (.gitkeep), not its contents.
 mariadb-galera/data/mariadb-logs/*
-mariadb-galera/data/maxscale-logs/*
 !mariadb-galera/data/mariadb-logs/.gitkeep
-!mariadb-galera/data/maxscale-logs/.gitkeep
