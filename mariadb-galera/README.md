@@ -2,7 +2,7 @@
 
 Manual-QA / exploration lab: 3-node MariaDB Galera cluster (synchronous multi-master via certification-based replication) fronted by MaxScale's readwritesplit listener. App source lives in the separate `siem-tracker` repo; see the [repo-root README](../README.md) for the full list of labs.
 
-Mirrors the app repo's `containers/mariadb-galera` dev lab exactly in topology, but every service here is a **pulled registry image** (`ngmaibulat/usiem-tracker:latest` for the app) — this lab never builds anything. No nginx/squid/TLS (DB-topology-focused, not prod-shaped — see [`../default`](../default) for that).
+Mirrors the app repo's `containers/mariadb-galera` dev lab exactly in topology, but every service here is a **pulled registry image** (`ngmaibulat/usiem-tracker:latest` for the app) — this lab never builds anything. nginx fronts the app on host 80/443 as the only web entry point (wizard-generated config/TLS, same volume wiring as [`../default`](../default)); no squid here (DB-topology-focused, not fully prod-shaped — see [`../default`](../default)). Every lab's nginx binds 80/443, so only one lab can be up at a time.
 
 Unlike the master-slave/multimaster labs, the app here is **not** pinned to one physical node — MaxScale routes it to whichever node is currently designated for writes.
 
@@ -30,7 +30,7 @@ docker compose ps        # wait for all three nodes to report healthy
 
 If `migrate` fails on the very first run with a connection error, the cluster/MaxScale may still be settling (there's no MaxScale healthcheck to gate on) — wait a few seconds and re-run `docker compose run --rm migrate`; it's idempotent.
 
-App: http://localhost:3005 (first load goes to the setup wizard). MaxScale's GUI/REST API is at http://localhost:18989 (admin/mariadb, dev-only plain HTTP).
+App: http://localhost (first load goes to the setup wizard; https://localhost works after the wizard's TLS step — apply the generated config with `docker compose exec nginx nginx -s reload`). MaxScale's GUI/REST API is at http://localhost:18989 (admin/mariadb, dev-only plain HTTP).
 
 ## Verify the cluster
 
@@ -66,7 +66,7 @@ docker compose down -v   # wipes all three node volumes together and re-bootstra
 
 | Port | Service |
 |---|---|
-| 3005 | app |
+| 80 / 443 | nginx — the only web entry point (proxies to the internal `app:3000`) |
 | 3346 / 3347 / 3348 | mariadb-node1 / node2 / node3 |
 | 14006 | maxscale (readwritesplit SQL listener) |
 | 18989 | maxscale GUI/REST (admin/mariadb) |

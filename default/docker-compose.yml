@@ -217,8 +217,10 @@ services:
       - squid_logs:/var/log/squid
     restart: unless-stopped
 
-  # Search engine. Provisioned for future use — the app does not talk to it yet
-  # (no MEILI_* code), so it has no `depends_on` and runs idle. Internal-only:
+  # Search engine: full-text search over source comments and feature requests
+  # (wired via MEILI_URL/MEILI_MASTER_KEY on the app service). Optional
+  # accelerator — deliberately no `depends_on`: when it's down/unreachable the
+  # app transparently falls back to a DB substring match. Internal-only:
   # reachable on the compose network as meilisearch:7700, never published.
   meilisearch:
     image: getmeili/meilisearch:v1.13
@@ -280,6 +282,12 @@ services:
       APP_URL: ${APP_URL}
       # Optional shared secret for the cron daily-snapshot endpoint (FR-14).
       SNAPSHOT_TOKEN: ${SNAPSHOT_TOKEN:-}
+      # Pin the SQLite connection registry (FR-31 — holds the plane connections
+      # AND the wizard-generated APP_SECRET) onto the app_data volume
+      # explicitly: the code default is cwd-relative, and losing this file
+      # orphans everything encrypted with the lost secret. Also baked into the
+      # image as ENV; kept here so the contract is visible in the compose file.
+      REGISTRY_DB_PATH: /app/data/registry.sqlite
       # Reverse-proxy wiring: the wizard writes TLS artifacts and the generated
       # nginx config into these dirs, which are volumes shared with the nginx
       # container (see the header comment). NGINX_UPSTREAM is what the generated
@@ -298,10 +306,13 @@ services:
       HTTPS_PROXY: http://squid:3128
       NO_PROXY: localhost,127.0.0.1,mariadb-master,mariadb-slave1,mariadb-slave2,postgres,redis,mailhog,meilisearch,nginx,app,squid
       SQUID_LOG_DIR: /app/squid-logs
-      # Search engine — provisioned by the `meilisearch` service below but NOT yet
-      # wired into the app (no code reads these today). Uncomment when search lands.
-      # MEILI_URL: http://meilisearch:7700
-      # MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      # Search engine: full-text search over source comments and feature
+      # requests (the app falls back to a DB substring match when these are
+      # unset or Meilisearch is unreachable). After first enabling on an
+      # existing install — or after restoring a backup — run "Reindex now" at
+      # /admin/search to index pre-existing content.
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
     volumes:
       # Connection registry (SQLite with AES-encrypted DB creds, FR-31) and
       # backups must survive container recreation, otherwise in-app DB switching

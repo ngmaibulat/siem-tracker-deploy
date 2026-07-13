@@ -2,7 +2,7 @@
 
 Manual-QA / exploration lab: the siem-tracker app running against a 2-node MariaDB circular ("multi-master") replication topology using classic binlog/GTID replication — NOT Galera (see [`../mariadb-galera`](../mariadb-galera) for the certification-based multi-master lab). App source lives in the separate `siem-tracker` repo; see the [repo-root README](../README.md) for the full list of labs.
 
-Mirrors the app repo's `containers/mariadb-multimaster` dev lab exactly in topology, but every service here is a **pulled registry image** (`ngmaibulat/usiem-tracker:latest` for the app) — this lab never builds anything. No nginx/squid/TLS (DB-topology-focused, not prod-shaped — see [`../default`](../default) for that).
+Mirrors the app repo's `containers/mariadb-multimaster` dev lab exactly in topology, but every service here is a **pulled registry image** (`ngmaibulat/usiem-tracker:latest` for the app) — this lab never builds anything. nginx fronts the app on host 80/443 as the only web entry point (wizard-generated config/TLS, same volume wiring as [`../default`](../default)); no squid here (DB-topology-focused, not fully prod-shaped — see [`../default`](../default)). Every lab's nginx binds 80/443, so only one lab can be up at a time.
 
 ## Deploy
 
@@ -14,7 +14,7 @@ docker compose run --rm migrate
 docker compose up -d
 ```
 
-App: http://localhost:3004 — follow the initial configuration wizard on first load.
+App: http://localhost — follow the initial configuration wizard on first load (https://localhost works after the wizard's TLS step; apply the generated config with `docker compose exec nginx nginx -s reload`).
 
 ## Topology
 
@@ -38,7 +38,7 @@ And the reverse direction (insert on node2, read from node1) to confirm both dir
 
 | Port | Service |
 |---|---|
-| 3004 | app |
+| 80 / 443 | nginx — the only web entry point (proxies to the internal `app:3000`) |
 | 3336 | mariadb-node1 |
 | 3337 | mariadb-node2 |
 | 5443 | postgres (FR-42 restore-helper only) |
