@@ -6,11 +6,11 @@ Production / manual-QA deployment stack for **SIEM Source Onboarding Tracker** (
 
 | Lab | Mirrors (app repo) | Topology | App URL |
 |---|---|---|---|
-| [`default/`](default/README.md) | `containers/default` | nginx (TLS) → app → MariaDB master+2 slaves (domain) + Postgres (control) + Redis + MailHog + Squid | https://localhost |
-| [`mariadb-multimaster/`](mariadb-multimaster/README.md) | `containers/mariadb-multimaster` | nginx (TLS) → app → 2-node circular MariaDB replication (binlog/GTID) | https://localhost |
-| [`mariadb-galera/`](mariadb-galera/README.md) | `containers/mariadb-galera` | nginx (TLS) → app → 3-node Galera cluster | https://localhost |
+| [`default/`](default/README.md) | `containers/default` | nginx (TLS) → app → MariaDB master+2 slaves (domain) + Postgres (control) + Redis + Squid + Meilisearch + MinIO | https://localhost |
+| [`mariadb-multimaster/`](mariadb-multimaster/README.md) | `containers/mariadb-multimaster` | nginx (TLS) → app → 2-node circular MariaDB replication (binlog/GTID) + MinIO | https://localhost |
+| [`mariadb-galera/`](mariadb-galera/README.md) | `containers/mariadb-galera` | nginx (TLS) → app → 3-node Galera cluster + MinIO | https://localhost |
 
-`default/` is the prod-shaped lab — the only one with nginx/TLS/squid, and the one to use for an actual deployment. `mariadb-multimaster/` and `mariadb-galera/` are DB-topology-focused QA/exploration labs (no squid/Meilisearch/control-plane Postgres candidate) — bring them up to poke at a specific replication/clustering behavior without touching your `default/` deployment. Every lab fronts the app with its own nginx on host ports **80/443** (the only web entry point — the app publishes no ports; first load serves the setup wizard over HTTP, HTTPS works after the wizard's TLS step), so **only one lab can be up at a time**; every other published port (DB nodes, MailHog) is distinct per lab.
+`default/` is the prod-shaped lab — the only one with nginx/TLS/squid/Meilisearch, and the one to use for an actual deployment. `mariadb-multimaster/` and `mariadb-galera/` are DB-topology-focused QA/exploration labs (no squid/Meilisearch/control-plane Postgres candidate) — bring them up to poke at a specific replication/clustering behavior without touching your `default/` deployment. No lab runs MailHog — a fake mail catcher has no place here; every lab needs a real SMTP server, configured via the wizard or `/admin/smtp`. Every lab does run MinIO, backing the rich-text editor's pasted-image uploads. Every lab fronts the app with its own nginx on host ports **80/443** (the only web entry point — the app publishes no ports; first load serves the setup wizard over HTTP, HTTPS works after the wizard's TLS step), so **only one lab can be up at a time**; every other published port (DB nodes) is distinct per lab.
 
 ## Deploy a lab
 

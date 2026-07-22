@@ -10,8 +10,9 @@
 # publishes no ports; config + TLS are wizard-generated, same volume wiring
 # as ../default). No squid and no separate control-plane Postgres candidate
 # here (DB-topology-focused, not fully prod-shaped) — see ../default for
-# that. Own DB/mailhog ports and volumes, but NOTE: every lab's nginx binds
-# host 80/443, so only one lab (default included) can be up at a time.
+# that. No MailHog either — real SMTP only, configured via the wizard or
+# /admin/smtp. Own DB/minio ports and volumes, but NOTE: every lab's nginx
+# binds host 80/443, so only one lab (default included) can be up at a time.
 #
 # Bring up (from this directory):
 #   cp example.env .env && docker compose pull && docker compose run --rm migrate && docker compose up -d
@@ -33,7 +34,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      mailhog:
+      minio:
         condition: service_started
     environment:
       # The only DB-connection env var this lab sets — no DB_POSTGRES_URL, so
@@ -44,7 +45,8 @@ services:
       # its own `<base>_control` database (created by mariadb/init/01-init.sh).
       DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
       REDIS_URL: redis://redis:6379
-      SMTP_URL: smtp://mailhog:1025?from=noreply@siem-tracker.local
+      # No SMTP_URL / MailHog here — configure a real SMTP server via the
+      # wizard or /admin/smtp; mail config lives in the DB, never in this env.
       APP_SECRET: ${APP_SECRET}
       # Public base URL (invite/reset links). Behind nginx; override in .env
       # when serving on a real hostname.
@@ -68,6 +70,13 @@ services:
       NGINX_CONF_DIR: /app/nginx
       NGINX_UPSTREAM: app:3000
       NGINX_LOG_DIR: /app/nginx-logs
+      # S3-compatible object storage for uploaded rich-text images (optional —
+      # unset ⇒ image paste-upload disabled, editor still works). Matches the
+      # minio service below; the bucket is auto-created on first upload.
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: siem_minio
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-siem_minio_password}
+      S3_BUCKET: siem-files
     volumes:
       # Connection registry (SQLite, FR-31 — holds the plane connections AND
       # the wizard-generated APP_SECRET) + uploaded backups must survive
@@ -93,11 +102,25 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
-  mailhog:
-    image: mailhog/mailhog:latest
-    container_name: siem-tracker-multimaster-mailhog
-    ports:
-      - "8029:8025"
+  # S3-compatible object storage for uploaded rich-text images (optional
+  # accelerator posture like redis: the app treats "S3_ENDPOINT unset" or
+  # "minio down" as uploads-disabled, never a crash). Internal-only: reachable
+  # on the compose network as minio:9000, never published. The app
+  # auto-creates the bucket on first upload — no mc init sidecar.
+  minio:
+    image: minio/minio:latest
+    container_name: siem-tracker-multimaster-minio
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: siem_minio
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-siem_minio_password}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # NOTE: node1 and node2 deliberately have NO depends_on relationship between
@@ -272,6 +295,7 @@ volumes:
   node2_data:
   postgres_data:
   redis_data:
+  minio_data:
   app_data:
   app_backups:
   # app ⇄ nginx shared: generated config (app.conf) and TLS cert/key.

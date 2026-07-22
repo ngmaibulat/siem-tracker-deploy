@@ -2,7 +2,7 @@
 
 Manual-QA / exploration lab: 3-node MariaDB Galera cluster (synchronous multi-master via certification-based replication). App source lives in the separate `siem-tracker` repo; see the [repo-root README](../README.md) for the full list of labs.
 
-Mirrors the app repo's `containers/mariadb-galera` dev lab in topology (minus its MaxScale proxy — removed here; the app connects to the cluster directly), but every service here is a **pulled registry image** (`ngmaibulat/usiem-tracker:latest` for the app) — this lab never builds anything. nginx fronts the app on host 80/443 as the only web entry point (wizard-generated config/TLS, same volume wiring as [`../default`](../default)); no squid here (DB-topology-focused, not fully prod-shaped — see [`../default`](../default)). Every lab's nginx binds 80/443, so only one lab can be up at a time.
+Mirrors the app repo's `containers/mariadb-galera` dev lab in topology (minus its MaxScale proxy — removed here; the app connects to the cluster directly), but every service here is a **pulled registry image** (`ngmaibulat/usiem-tracker:latest` for the app) — this lab never builds anything. nginx fronts the app on host 80/443 as the only web entry point (wizard-generated config/TLS, same volume wiring as [`../default`](../default)); no squid here (DB-topology-focused, not fully prod-shaped — see [`../default`](../default)). No MailHog either — real SMTP only, configured via the wizard or `/admin/smtp`; a MinIO service backs rich-text image uploads. Every lab's nginx binds 80/443, so only one lab can be up at a time.
 
 The app talks only to node1 (any node would do — Galera is multi-master); node2/3 are cluster peers it never contacts directly, reachable on their own host ports for manual QA.
 
@@ -64,11 +64,12 @@ docker compose down -v   # wipes all three node volumes together and re-bootstra
 | 80 / 443 | nginx — the only web entry point (proxies to the internal `app:3000`) |
 | 3346 / 3347 / 3348 | mariadb-node1 / node2 / node3 |
 | 5445 | postgres (FR-42 restore-helper only) |
-| 8030 | mailhog web UI |
 
 ## Notes
 
 - The cluster runs `mariadb:13.0.1-rc`, not the 13.1 preview the other labs use: no current 13.1 build (preview or rolling, any variant) ships a working Galera provider library. Re-pin to 13.1 once a Galera-capable build exists.
 - No `DB_POSTGRES_URL` is set: the control plane, if the wizard assigns it MariaDB, derives from the same backend as `siem_source_tracker_control`, keeping this lab focused on its own cluster topology (unlike `../default`, which offers a separate Postgres candidate).
 - `postgres` is not part of the cluster/routing topology — it exists solely as the FR-42 restore-helper for staging legacy pg_dump restores.
+- No MailHog: outbound mail needs a real SMTP server, configured via the wizard or `/admin/smtp`.
+- `minio` backs the rich-text editor's pasted-image uploads (`S3_*` env vars on `app`); internal-only, never published — the app degrades gracefully if it's down.
 - The healthcheck on all three nodes uses **root credentials**, not the MariaDB image's built-in `healthcheck.sh`: SST (State Snapshot Transfer, used when a node joins/rejoins) overwrites the joiner's `mysql.user` table with the donor's, orphaning its locally-generated `healthcheck@localhost` password. Root's password is identical cluster-wide and survives SST; a non-synced Galera node also rejects queries, so `SELECT 1` doubles as a synced-check.
