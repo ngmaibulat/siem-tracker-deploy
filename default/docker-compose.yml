@@ -29,9 +29,9 @@
 #   cd <repo-root>
 #   # pull the pinned image (optional — `run`/`up` pull it if missing):
 #   docker compose pull
-#   # one-time / on schema change — apply migrations, then exit:
-#   docker compose run --rm migrate
-#   # bring the stack up:
+#   # bring the stack up — this also runs the one-shot `migrate` service to
+#   # completion first (the app depends on it), so pending schema migrations
+#   # are always applied before the app starts:
 #   docker compose up -d
 #
 # Required .env keys: APP_SECRET, APP_URL, TARGET_DATE, MEILI_MASTER_KEY.
@@ -282,6 +282,11 @@ services:
         condition: service_started
       minio:
         condition: service_started
+      # Schema first: every `up -d` runs the idempotent one-shot migrate job
+      # (below) to completion before the app starts, so image upgrades can
+      # never boot new code against a stale schema.
+      migrate:
+        condition: service_completed_successfully
     environment:
       # The only two DB-connection env vars the app reads (see the app repo's
       # CLAUDE.md, Environment section): one reachable Postgres server, one
@@ -312,6 +317,9 @@ services:
       APP_URL: ${APP_URL}
       # Optional shared secret for the cron daily-snapshot endpoint (FR-14).
       SNAPSHOT_TOKEN: ${SNAPSHOT_TOKEN:-}
+      # Optional shared secret the external scheduler service (FR-46, below)
+      # authenticates with; /api/scheduler/config answers 503 while unset.
+      SCHEDULER_TOKEN: ${SCHEDULER_TOKEN:-}
       # Pin the SQLite connection registry (FR-31 — holds the plane connections
       # AND the wizard-generated APP_SECRET) onto the app_data volume
       # explicitly: the code default is cwd-relative, and losing this file
@@ -368,10 +376,30 @@ services:
       # Reserved for future file logging; the app logs to stdout today.
       - app_logs:/app/logs
     # No published ports — the app is reached only through nginx. The image's
-    # HEALTHCHECK covers readiness. Migrations are NOT run on start (the one-shot
-    # `migrate` service below handles them); a routine restart never touches the
-    # schema. The app self-restarts via process.exit on /admin/restart, so the
+    # HEALTHCHECK covers readiness. The app process itself never migrates on
+    # start — pending migrations are applied by the one-shot `migrate` service
+    # below, which `up -d` runs to completion first (see its depends_on entry
+    # above); a routine container restart never touches the schema. The app
+    # self-restarts via process.exit on /admin/restart, so the
     # `unless-stopped` policy is what brings it back.
+    restart: unless-stopped
+
+  # External scheduler service (FR-46): a thin Bun trigger that polls the app's
+  # /api/scheduler/config and fires due jobs (scheduled report delivery) via
+  # /api/scheduler/run. It holds NO business logic, DB access, or SMTP
+  # credentials — everything runs inside the app. Requires SCHEDULER_TOKEN in
+  # .env (must match the app service's copy above); when the token is unset the
+  # container exits immediately and `unless-stopped` respawns it in a loop, so
+  # comment this service out if you don't use scheduled report delivery.
+  scheduler:
+    image: ngmaibulat/usiem-scheduler:latest
+    container_name: siem-source-tracker-scheduler
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      APP_INTERNAL_URL: http://app:3000
+      SCHEDULER_TOKEN: ${SCHEDULER_TOKEN:-}
     restart: unless-stopped
 
   nginx:
@@ -411,17 +439,20 @@ services:
       - nginx_logs:/var/log/nginx
     restart: unless-stopped
 
-  # One-shot schema migration. The `migrate` profile keeps it out of the normal
-  # `up -d`; run it explicitly before bringing the app up/updating it. The
-  # `migrate` argument is recognized by the image entrypoint (docker-entrypoint.sh)
-  # and runs `prisma migrate deploy` on BOTH planes. It is idempotent. There is no
-  # admin seed: a fresh install boots into the Initial Configuration Wizard
-  # (/setup), which creates the first admin and can itself apply the schema — so
-  # this job is optional (handy for pre-migrating a data-plane switch target).
+  # One-shot schema migration, run automatically on every `up -d`: the app
+  # service waits for it via depends_on service_completed_successfully, so a
+  # `docker compose pull && docker compose up -d` upgrade applies pending
+  # migrations BEFORE the new app version starts (previously this was gated
+  # behind a `migrate` profile that the documented upgrade path skipped —
+  # upgrades then ran new code against a stale schema). The `migrate` argument
+  # is recognized by the image entrypoint (docker-entrypoint.sh) and runs
+  # `prisma migrate deploy` on BOTH planes. It is idempotent, and only `up`
+  # re-runs it — a plain `docker restart`/crash respawn of the running app
+  # container still never touches the schema. Running it standalone
+  # (`docker compose run --rm migrate`, as deploy_app.sh does) remains valid.
   migrate:
     image: ngmaibulat/usiem-tracker:latest
     container_name: siem-source-tracker-migrate
-    profiles: ["migrate"]
     depends_on:
       mariadb-master:
         condition: service_healthy

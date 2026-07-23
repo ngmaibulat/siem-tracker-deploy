@@ -35,6 +35,7 @@ The same three compose commands are also the update procedure — re-run them to
 - **Control plane (Postgres, by wizard default)**: the `postgres` service hosts a base `siem_source_tracker` database (identity/auth lives in its own `control` schema within it once the wizard assigns it there) — it does not double as the domain-plane database. `CONTROL_DB_PROVIDER=postgres` on the `app`/`migrate` services picks the Prisma CLI's pre-migration target for it, matching the intent that this compose file's default topology is domain=MariaDB / control=Postgres — but, as above, the wizard is what actually decides at runtime. It also doubles as the FR-42 restore-helper (`RESTORE_PG_URL`) for staging legacy pg_dump restores.
 - **Volume contracts**: `app_data` (SQLite connection registry with encrypted creds, FR-31) and `app_backups` must survive recreation; they're deliberately on separate volumes from `proxy_conf`/`proxy_certs` so nginx never mounts anything containing secrets. `squid` is the app's egress proxy (FR-32) — all outbound HTTP/HTTPS goes through it via `HTTP_PROXY`/`HTTPS_PROXY`; the app degrades gracefully if squid is down.
 - **MinIO (S3-compatible storage)**: backs the rich-text editor's pasted-image uploads (`S3_ENDPOINT`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/`S3_BUCKET` on `app`). Internal-only, never published; the app auto-creates the `siem-files` bucket on first upload — no init sidecar. Optional accelerator, same posture as squid/meilisearch: the app degrades gracefully if MinIO is down (image paste-upload just stays disabled, nothing else breaks).
+- **Scheduler (FR-46, scheduled report delivery)**: the `scheduler` service runs the `ngmaibulat/usiem-scheduler` image (versioned in lockstep with the app image) — a thin Bun trigger that polls the app's `/api/scheduler/config` and fires due jobs via `/api/scheduler/run`; all real work (rendering PDFs, sending mail) happens inside the app. Requires `SCHEDULER_TOKEN` in `.env`; without it the container exits on start (comment the service out if unused).
 
 ### Gotchas
 
@@ -58,7 +59,7 @@ docker compose exec nginx nginx -s reload
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | Compose stack: nginx → app → mariadb (domain) / postgres (control) / redis / squid / minio |
+| `docker-compose.yml` | Compose stack: nginx → app → mariadb (domain) / postgres (control) / redis / squid / minio / scheduler |
 | `example.env` | Template for the prod `.env` (`cp example.env .env`) |
 | `mariadb/replication.cnf` | Config mounted into all three MariaDB nodes |
 | `mariadb/init-master/01-init.sh` | One-time master init: control-plane sandbox DB + `repl` replication user |
