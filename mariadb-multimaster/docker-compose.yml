@@ -48,10 +48,13 @@ services:
       # No SMTP_URL / MailHog here — configure a real SMTP server via the
       # wizard or /admin/smtp; mail config lives in the DB, never in this env.
       APP_SECRET: ${APP_SECRET}
-      # Public base URL (invite/reset links). Behind nginx; override in .env
-      # when serving on a real hostname.
-      APP_URL: ${APP_URL:-http://localhost}
-      TARGET_DATE: ${TARGET_DATE:-2026-12-31}
+      # Public base URL (invite/reset links). Optional: unset/blank defers to
+      # whatever the Initial Configuration Wizard's "app URL" step saved;
+      # override in .env only to pin a stable value when serving on a real
+      # hostname (a hardcoded non-blank default here would always win over the
+      # wizard-saved value, since env takes precedence when non-blank).
+      APP_URL: ${APP_URL:-}
+      TARGET_DATE: ${TARGET_DATE:-}
       # Optional shared secret the external scheduler service (FR-46, below)
       # authenticates with; /api/scheduler/config answers 503 while unset.
       SCHEDULER_TOKEN: ${SCHEDULER_TOKEN:-}

@@ -8,7 +8,10 @@ From this directory:
 
 ```bash
 cd default
-cp example.env .env          # fill in APP_SECRET, APP_URL, TARGET_DATE, ...
+cp example.env .env           # nothing is strictly required to fill in — see example.env's
+                              # "--- Required ---"/"--- Optional ---" split (APP_URL/TARGET_DATE
+                              # are set via the wizard below; pin them here only if you want a
+                              # stable value across restarts)
 chmod 600 .env               # it holds secrets — keep it owner-readable only
 
 docker compose pull                # fetch the published image
@@ -18,7 +21,7 @@ docker compose up -d               # bring the stack up (runs pending DB migrati
 Then, on the first deploy:
 
 1. Wait until the app is online — `docker compose ps` shows the `app` service as `healthy` (the image ships a HEALTHCHECK).
-2. Open `APP_URL` in a browser and follow the initial configuration wizard.
+2. Open the host in a browser (the address behind nginx — same as `APP_URL` if you pinned it in `.env`) and follow the initial configuration wizard, which is where the app URL actually gets saved.
 3. The app restarts when the wizard completes; once it is back online, consider restoring a DB backup from the UI (backups are managed in the app).
 
 The same two compose commands are also the update procedure — re-run them to roll out a new image; the app applies its own pending migrations at startup (FR-47), so no separate migrate step is needed.

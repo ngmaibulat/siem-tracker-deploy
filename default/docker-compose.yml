@@ -34,9 +34,11 @@
 #   # advisory-lock protected; opt out with AUTO_MIGRATE=off):
 #   docker compose up -d
 #
-# Required .env keys: APP_SECRET, APP_URL, TARGET_DATE.
-# Optional: SNAPSHOT_TOKEN (enables the cron snapshot endpoint),
-# POSTGRES_PASSWORD, MARIADB_ROOT_PASSWORD, MARIADB_PASSWORD, MARIADB_REPL_PASSWORD,
+# Required .env keys: APP_SECRET.
+# Optional: APP_URL, TARGET_DATE (both are set via the Initial Configuration
+# Wizard at first boot and only need pinning here for restart-stable values —
+# see the app service's env block below), SNAPSHOT_TOKEN (enables the cron
+# snapshot endpoint), POSTGRES_PASSWORD, MARIADB_ROOT_PASSWORD, MARIADB_PASSWORD, MARIADB_REPL_PASSWORD,
 # MINIO_ROOT_PASSWORD, MEILI_MASTER_KEY.
 # See example.env in this folder.
 
@@ -308,10 +310,16 @@ services:
       # Configuration Wizard or /admin/smtp; mail config lives in the DB
       # (SmtpServer rows), never in this env var.
       APP_SECRET: ${APP_SECRET}
-      TARGET_DATE: ${TARGET_DATE}
+      # Fallback forecast target date — only used when nothing is stored yet in
+      # the DB (the wizard's own target-date step, or later /admin edits, take
+      # over from there). Optional: leave unset to let the wizard drive it, or
+      # pin a value here for restart-stable default behavior.
+      TARGET_DATE: ${TARGET_DATE:-}
       # Public base URL used to build invite/reset links in emails. Behind nginx
-      # this is the HTTPS origin, e.g. https://siem.example.local
-      APP_URL: ${APP_URL}
+      # this is the HTTPS origin, e.g. https://siem.example.local. Optional: an
+      # unset/blank value here defers to whatever the Initial Configuration
+      # Wizard's "app URL" step saved; set it here only to pin a stable value.
+      APP_URL: ${APP_URL:-}
       # Optional shared secret for the cron daily-snapshot endpoint (FR-14).
       SNAPSHOT_TOKEN: ${SNAPSHOT_TOKEN:-}
       # Optional shared secret the external scheduler service (FR-46, below)
