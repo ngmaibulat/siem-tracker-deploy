@@ -59,8 +59,11 @@ $COMPOSE exec -T postgres pg_dump -U siem -d siem_source_tracker -Fc > "$BACKUP_
 echo "==> Pulling app image from registry"
 $COMPOSE pull app
 
-# Apply pending migrations BEFORE starting the app (the app never migrates on
-# start). Idempotent — a no-op when the schema is already current.
+# Apply pending migrations BEFORE starting the app. `up -d` below would run
+# the migrate one-shot anyway (the app depends_on its completion), but doing
+# it explicitly here surfaces migration output/failures in the deploy log
+# before the stack is touched. Idempotent — a no-op when the schema is
+# already current.
 echo "==> Applying database migrations"
 $COMPOSE run --rm migrate
 

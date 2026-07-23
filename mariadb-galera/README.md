@@ -18,12 +18,11 @@ cd mariadb-galera
 mkdir -p data/mariadb-logs
 cp example.env .env
 docker compose pull
-docker compose run --rm migrate
 docker compose up -d
-docker compose ps        # wait for all three nodes to report healthy
+docker compose ps        # wait for all three nodes and the app to report healthy
 ```
 
-If `migrate` fails on the very first run with a connection error, the cluster may still be settling — wait a few seconds and re-run `docker compose run --rm migrate`; it's idempotent.
+`up -d` runs the one-shot `migrate` job to completion before starting the app. If it fails on the very first run with a connection error, the cluster may still be settling — wait a few seconds and re-run `docker compose run --rm migrate` (idempotent), then `docker compose up -d` again.
 
 App: http://localhost (first load goes to the setup wizard; https://localhost works after the wizard's TLS step — apply the generated config with `docker compose exec nginx nginx -s reload`).
 
@@ -72,4 +71,5 @@ docker compose down -v   # wipes all three node volumes together and re-bootstra
 - `postgres` is not part of the cluster/routing topology — it exists solely as the FR-42 restore-helper for staging legacy pg_dump restores.
 - No MailHog: outbound mail needs a real SMTP server, configured via the wizard or `/admin/smtp`.
 - `minio` backs the rich-text editor's pasted-image uploads (`S3_*` env vars on `app`); internal-only, never published — the app degrades gracefully if it's down.
+- `scheduler` backs FR-46 scheduled report delivery — a thin Bun trigger (`ngmaibulat/usiem-scheduler` image) that polls the app's `/api/scheduler/config` and fires due jobs via `/api/scheduler/run`; no business logic, DB access, or SMTP credentials live in it. Requires `SCHEDULER_TOKEN` in `.env`; without it the container exits on start (comment the service out if unused).
 - The healthcheck on all three nodes uses **root credentials**, not the MariaDB image's built-in `healthcheck.sh`: SST (State Snapshot Transfer, used when a node joins/rejoins) overwrites the joiner's `mysql.user` table with the donor's, orphaning its locally-generated `healthcheck@localhost` password. Root's password is identical cluster-wide and survives SST; a non-synced Galera node also rejects queries, so `SELECT 1` doubles as a synced-check.

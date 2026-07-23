@@ -10,9 +10,9 @@ Each lab is a **fully self-contained Compose project** in its own subdirectory �
 
 | Lab | Mirrors | Topology | Ports |
 |---|---|---|---|
-| [`default/`](default/README.md) | `containers/default` | nginx (TLS) → app → MariaDB master+2 slaves (domain) + Postgres (control) + Redis + Squid + MinIO | 80, 443 |
-| [`mariadb-multimaster/`](mariadb-multimaster/README.md) | `containers/mariadb-multimaster` | nginx (TLS) → app → 2-node circular MariaDB replication (binlog/GTID) + Postgres (restore-helper only) + MinIO | 80, 443, 3336-3337, 5443 |
-| [`mariadb-galera/`](mariadb-galera/README.md) | `containers/mariadb-galera` | nginx (TLS) → app → 3-node Galera cluster + Postgres (restore-helper only) + MinIO | 80, 443, 3346-3348, 5445 |
+| [`default/`](default/README.md) | `containers/default` | nginx (TLS) → app → MariaDB master+2 slaves (domain) + Postgres (control) + Redis + Squid + MinIO + Scheduler | 80, 443 |
+| [`mariadb-multimaster/`](mariadb-multimaster/README.md) | `containers/mariadb-multimaster` | nginx (TLS) → app → 2-node circular MariaDB replication (binlog/GTID) + Postgres (restore-helper only) + MinIO + Scheduler | 80, 443, 3336-3337, 5443 |
+| [`mariadb-galera/`](mariadb-galera/README.md) | `containers/mariadb-galera` | nginx (TLS) → app → 3-node Galera cluster + Postgres (restore-helper only) + MinIO + Scheduler | 80, 443, 3346-3348, 5445 |
 
 `default/` is the only fully prod-shaped lab (squid egress proxy, Meilisearch, control plane pinned to a separate Postgres). All three labs now run MinIO-backed S3 uploads for the rich-text editor. The other two are DB-topology-focused QA/exploration labs (control plane derives from the same MariaDB backend); like every lab they front the app with their own nginx on 80/443 (wizard-generated config/TLS, app unpublished) — see each lab's own README for full detail, architecture notes, and gotchas specific to it.
 
@@ -26,11 +26,10 @@ Every lab follows the same three-command pattern, run from inside the lab's own 
 cd <lab>                           # default | mariadb-multimaster | mariadb-galera
 cp example.env .env
 docker compose pull                # fetch the published image
-docker compose run --rm migrate    # one-shot Prisma migrations, idempotent (profile keeps it out of `up`)
-docker compose up -d               # bring the stack up
+docker compose up -d               # bring the stack up — runs the one-shot `migrate` service (idempotent Prisma migrations) to completion first, then starts the app
 ```
 
-The same three commands are both first deploy and update procedure. On schema changes, always `migrate` **before** `up -d`. See each lab's README for lab-specific verify/bring-up notes (e.g. `mariadb-galera` needs `mkdir -p data/mariadb-logs` first, and its `migrate` may need a retry if run before the cluster settles).
+The same two commands are both first deploy and update procedure — pending migrations always apply automatically before the app starts (the app's `depends_on: migrate: condition: service_completed_successfully`), so new code can never boot on a stale schema. `docker compose run --rm migrate` remains valid standalone (e.g. pre-migrating a data-plane switch target, or explicit pre-flight logging in `scripts/deploy_app.sh`). See each lab's README for lab-specific verify/bring-up notes (e.g. `mariadb-galera` needs `mkdir -p data/mariadb-logs` first, and its `migrate` may need a retry if run standalone before the cluster settles).
 
 Never run on a lab you care about: `docker compose down -v`, `docker volume rm <project>_*_data`, `docker system prune --volumes` — these destroy the database.
 

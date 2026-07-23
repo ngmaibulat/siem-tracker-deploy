@@ -450,6 +450,15 @@ services:
   # re-runs it — a plain `docker restart`/crash respawn of the running app
   # container still never touches the schema. Running it standalone
   # (`docker compose run --rm migrate`, as deploy_app.sh does) remains valid.
+  #
+  # NOTE (FR-47): this job migrates the ENV-derived targets below, which is
+  # useful for pre-migrating a fresh install before the wizard runs — but the
+  # RUNNING app resolves its databases from the wizard-stored SQLite registry,
+  # which can point elsewhere (different database/schema/provider). Since
+  # FR-47 the app therefore ALSO auto-applies pending migrations at startup
+  # against its registry-resolved connections (both planes; ledger-less
+  # wizard-built schemas are auto-baselined; opt-out env AUTO_MIGRATE=off), so
+  # an upgrade no longer depends on this job guessing the app's real targets.
   migrate:
     image: ngmaibulat/usiem-tracker:latest
     container_name: siem-source-tracker-migrate

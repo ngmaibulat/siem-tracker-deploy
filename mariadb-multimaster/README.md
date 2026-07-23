@@ -10,7 +10,6 @@ Mirrors the app repo's `containers/mariadb-multimaster` dev lab exactly in topol
 cd mariadb-multimaster
 cp example.env .env
 docker compose pull
-docker compose run --rm migrate
 docker compose up -d
 ```
 
@@ -49,4 +48,5 @@ And the reverse direction (insert on node2, read from node1) to confirm both dir
 - `postgres` is not part of the replication topology — it exists solely as the FR-42 restore-helper for staging legacy pg_dump restores.
 - No MailHog: outbound mail needs a real SMTP server, configured via the wizard or `/admin/smtp`.
 - `minio` backs the rich-text editor's pasted-image uploads (`S3_*` env vars on `app`); internal-only, never published — the app degrades gracefully if it's down.
+- `scheduler` backs FR-46 scheduled report delivery — a thin Bun trigger (`ngmaibulat/usiem-scheduler` image) that polls the app's `/api/scheduler/config` and fires due jobs via `/api/scheduler/run`; no business logic, DB access, or SMTP credentials live in it. Requires `SCHEDULER_TOKEN` in `.env`; without it the container exits on start (comment the service out if unused).
 - Passwords are parameterized via `.env` (see `example.env`) but default to the same values as the app repo's dev lab, so behavior is unchanged out of the box.

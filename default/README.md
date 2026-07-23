@@ -12,8 +12,7 @@ cp example.env .env          # fill in APP_SECRET, APP_URL, TARGET_DATE, ...
 chmod 600 .env               # it holds secrets — keep it owner-readable only
 
 docker compose pull                # fetch the published image
-docker compose run --rm migrate    # apply DB migrations (idempotent)
-docker compose up -d               # bring the stack up
+docker compose up -d               # bring the stack up (runs pending DB migrations first, automatically)
 ```
 
 Then, on the first deploy:
@@ -22,7 +21,7 @@ Then, on the first deploy:
 2. Open `APP_URL` in a browser and follow the initial configuration wizard.
 3. The app restarts when the wizard completes; once it is back online, consider restoring a DB backup from the UI (backups are managed in the app).
 
-The same three compose commands are also the update procedure — re-run them to roll out a new image.
+The same two compose commands are also the update procedure — re-run them to roll out a new image. To apply migrations by hand without touching the running stack, run `docker compose run --rm migrate` (idempotent).
 
 ## Manual QA
 
