@@ -37,11 +37,9 @@ services:
       # No depends_on on the mariadb nodes directly: they take much longer to
       # become usable than "started", and the app's own `restart:
       # unless-stopped` + startup check already retries until the DB answers.
-      # Schema first: every `up -d` runs the idempotent one-shot migrate job
-      # (below) to completion before the app starts — this also transitively
-      # waits for the cluster, since migrate itself waits on mariadb-node1.
-      migrate:
-        condition: service_completed_successfully
+      # The app applies its own pending migrations at startup (FR-47), so it
+      # doesn't need the cluster reachable before its own process starts —
+      # only before the migration step inside it runs.
     environment:
       # The only DB-connection env var this lab sets — no DB_POSTGRES_URL, so
       # the wizard's "use containerized DB" shortcut is MariaDB-only here,
@@ -342,39 +340,6 @@ services:
       # access.log/error.log become real files persisted across recreation.
       - nginx_logs:/var/log/nginx
     restart: unless-stopped
-
-  # One-shot schema migration, run automatically on every `up -d`: the app
-  # service waits for it via depends_on service_completed_successfully, so a
-  # `docker compose pull && docker compose up -d` upgrade applies pending
-  # migrations BEFORE the new app version starts. The `migrate` argument is
-  # recognized by the image entrypoint (docker-entrypoint.sh) and runs
-  # `prisma migrate deploy` on the domain plane. It is idempotent, and only
-  # `up` re-runs it — a plain `docker restart`/crash respawn of the running
-  # app container still never touches the schema. Running it standalone
-  # (`docker compose run --rm migrate`) remains valid.
-  migrate:
-    image: ngmaibulat/usiem-tracker:latest
-    container_name: siem-tracker-galera-migrate
-    # Unlike the app service, this one-shot job has no retry loop of its own,
-    # so — unlike app's deliberately dependency-free depends_on — it DOES need
-    # to wait for the cluster to actually be reachable before
-    # `prisma migrate deploy` runs.
-    depends_on:
-      mariadb-node1:
-        condition: service_healthy
-      mariadb-node2:
-        condition: service_started
-      mariadb-node3:
-        condition: service_started
-    environment:
-      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
-      # CLI-only: the Prisma CLI can't infer mariadb mode from a bare
-      # DB_MARIADB_URL the way it used to sniff a mysql:// DATABASE_URL, so
-      # both planes' provider must be picked explicitly.
-      DB_PROVIDER: mariadb
-      CONTROL_DB_PROVIDER: mariadb
-    command: ["migrate"]
-    restart: "no"
 
 volumes:
   node1_data:

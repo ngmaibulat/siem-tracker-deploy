@@ -15,8 +15,8 @@
 # is a LABEL only — it names the pre-deploy DB backup and the final report; it
 # does not select which image runs. To deploy/roll back to a specific version,
 # re-point `latest` at that tag in the registry first (see DEPLOY.md).
-# Takes a backup, applies migrations, then brings the stack up. Idempotent —
-# re-running is safe.
+# Takes a backup, then brings the stack up (the app applies its own pending
+# migrations on start — FR-47). Idempotent — re-running is safe.
 set -euo pipefail
 
 APP_DIR="/opt/siem-source-tracker"
@@ -55,17 +55,9 @@ BACKUP_FILE="$BACKUPS_DIR/siem_source_tracker_before_${IMAGE_TAG}_$(date +%F_%H-
 echo "==> Backing up database to $BACKUP_FILE"
 $COMPOSE exec -T postgres pg_dump -U siem -d siem_source_tracker -Fc > "$BACKUP_FILE"
 
-# Pull the registry's current `latest` (app + migrate share the image).
+# Pull the registry's current `latest`.
 echo "==> Pulling app image from registry"
 $COMPOSE pull app
-
-# Apply pending migrations BEFORE starting the app. `up -d` below would run
-# the migrate one-shot anyway (the app depends_on its completion), but doing
-# it explicitly here surfaces migration output/failures in the deploy log
-# before the stack is touched. Idempotent — a no-op when the schema is
-# already current.
-echo "==> Applying database migrations"
-$COMPOSE run --rm migrate
 
 echo "==> Starting stack (app + nginx + redis + meilisearch + postgres)"
 $COMPOSE up -d

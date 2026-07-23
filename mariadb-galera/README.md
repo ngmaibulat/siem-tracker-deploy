@@ -22,7 +22,7 @@ docker compose up -d
 docker compose ps        # wait for all three nodes and the app to report healthy
 ```
 
-`up -d` runs the one-shot `migrate` job to completion before starting the app. If it fails on the very first run with a connection error, the cluster may still be settling — wait a few seconds and re-run `docker compose run --rm migrate` (idempotent), then `docker compose up -d` again.
+The app applies its own pending migrations at startup (FR-47) once it can reach the cluster. On a very first boot, if the Galera cluster is still settling, the app's own retry/reconnect logic (plus `restart: unless-stopped`) handles it — just give it a few seconds and re-check `docker compose ps` / `docker compose logs app`.
 
 App: http://localhost (first load goes to the setup wizard; https://localhost works after the wizard's TLS step — apply the generated config with `docker compose exec nginx nginx -s reload`).
 

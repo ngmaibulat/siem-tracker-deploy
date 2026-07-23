@@ -36,11 +36,6 @@ services:
         condition: service_started
       minio:
         condition: service_started
-      # Schema first: every `up -d` runs the idempotent one-shot migrate job
-      # (below) to completion before the app starts, so image upgrades can
-      # never boot new code against a stale schema.
-      migrate:
-        condition: service_completed_successfully
     environment:
       # The only DB-connection env var this lab sets — no DB_POSTGRES_URL, so
       # the wizard's "use containerized DB" shortcut is MariaDB-only here,
@@ -137,9 +132,9 @@ services:
   # own retry loop below, independent of container start order. The loop
   # re-issues CHANGE MASTER/START SLAVE until BOTH slave threads report
   # Running: on a fresh install a node can request its own GTIDs from a peer
-  # that hasn't replicated them yet (IO error 1236, e.g. node1 after `migrate`
-  # ran against it before node2 caught up), and START SLAVE never retries
-  # that by itself.
+  # that hasn't replicated them yet (IO error 1236, e.g. node1 after the app's
+  # own FR-47 auto-migrate wrote schema to it before node2 caught up), and
+  # START SLAVE never retries that by itself.
   mariadb-node1:
     # 13.1 is preview-only (no GA / official Docker Hub tag yet) — pulled from
     # the MariaDB Foundation's devel registry; re-pin to `mariadb:13.1.x` on GA.
@@ -296,31 +291,6 @@ services:
       # access.log/error.log become real files persisted across recreation.
       - nginx_logs:/var/log/nginx
     restart: unless-stopped
-
-  # One-shot schema migration, run automatically on every `up -d`: the app
-  # service waits for it via depends_on service_completed_successfully, so a
-  # `docker compose pull && docker compose up -d` upgrade applies pending
-  # migrations BEFORE the new app version starts. The `migrate` argument is
-  # recognized by the image entrypoint (docker-entrypoint.sh) and runs
-  # `prisma migrate deploy` on the domain plane. It is idempotent, and only
-  # `up` re-runs it — a plain `docker restart`/crash respawn of the running
-  # app container still never touches the schema. Running it standalone
-  # (`docker compose run --rm migrate`) remains valid.
-  migrate:
-    image: ngmaibulat/usiem-tracker:latest
-    container_name: siem-tracker-multimaster-migrate
-    depends_on:
-      mariadb-node1:
-        condition: service_healthy
-    environment:
-      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-node1:3306/siem_source_tracker
-      # CLI-only: the Prisma CLI can't infer mariadb mode from a bare
-      # DB_MARIADB_URL the way it used to sniff a mysql:// DATABASE_URL, so
-      # both planes' provider must be picked explicitly.
-      DB_PROVIDER: mariadb
-      CONTROL_DB_PROVIDER: mariadb
-    command: ["migrate"]
-    restart: "no"
 
 volumes:
   node1_data:

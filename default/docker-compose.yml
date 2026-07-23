@@ -29,9 +29,9 @@
 #   cd <repo-root>
 #   # pull the pinned image (optional — `run`/`up` pull it if missing):
 #   docker compose pull
-#   # bring the stack up — this also runs the one-shot `migrate` service to
-#   # completion first (the app depends on it), so pending schema migrations
-#   # are always applied before the app starts:
+#   # bring the stack up — the app applies its own pending schema migrations
+#   # at startup, before it starts serving traffic (FR-47, registry-targeted,
+#   # advisory-lock protected; opt out with AUTO_MIGRATE=off):
 #   docker compose up -d
 #
 # Required .env keys: APP_SECRET, APP_URL, TARGET_DATE, MEILI_MASTER_KEY.
@@ -41,11 +41,10 @@
 # See example.env in this folder.
 
 services:
-  # Intended to host the CONTROL plane in this topology (identity/auth/audit —
-  # see DB_PROVIDER/CONTROL_DB_PROVIDER on the app/migrate services below,
-  # which pre-migrate it that way via the Prisma CLI). The DOMAIN plane lives
-  # on MariaDB (mariadb-master, below), a live example of the two planes
-  # running on independent providers (FR-43 in the app repo) — but which plane
+  # Intended to host the CONTROL plane in this topology (identity/auth/audit).
+  # The DOMAIN plane lives on MariaDB (mariadb-master, below), a live example
+  # of the two planes running on independent providers (FR-43 in the app
+  # repo) — but which plane
   # actually uses which provider at RUNTIME is a wizard choice, not fixed by
   # this file (see the app repo's CLAUDE.md, Connection registry section): the
   # operator just needs to tick "use containerized DB" for each plane's step to
@@ -282,11 +281,6 @@ services:
         condition: service_started
       minio:
         condition: service_started
-      # Schema first: every `up -d` runs the idempotent one-shot migrate job
-      # (below) to completion before the app starts, so image upgrades can
-      # never boot new code against a stale schema.
-      migrate:
-        condition: service_completed_successfully
     environment:
       # The only two DB-connection env vars the app reads (see the app repo's
       # CLAUDE.md, Environment section): one reachable Postgres server, one
@@ -376,12 +370,11 @@ services:
       # Reserved for future file logging; the app logs to stdout today.
       - app_logs:/app/logs
     # No published ports — the app is reached only through nginx. The image's
-    # HEALTHCHECK covers readiness. The app process itself never migrates on
-    # start — pending migrations are applied by the one-shot `migrate` service
-    # below, which `up -d` runs to completion first (see its depends_on entry
-    # above); a routine container restart never touches the schema. The app
-    # self-restarts via process.exit on /admin/restart, so the
-    # `unless-stopped` policy is what brings it back.
+    # HEALTHCHECK covers readiness. The app applies its own pending migrations
+    # at every start (FR-47): registry-resolved connections (both planes),
+    # advisory-lock protected against concurrent starts, opt out with
+    # AUTO_MIGRATE=off. The app self-restarts via process.exit on
+    # /admin/restart, so the `unless-stopped` policy is what brings it back.
     restart: unless-stopped
 
   # External scheduler service (FR-46): a thin Bun trigger that polls the app's
@@ -438,50 +431,6 @@ services:
       # access.log/error.log become real files persisted across recreation.
       - nginx_logs:/var/log/nginx
     restart: unless-stopped
-
-  # One-shot schema migration, run automatically on every `up -d`: the app
-  # service waits for it via depends_on service_completed_successfully, so a
-  # `docker compose pull && docker compose up -d` upgrade applies pending
-  # migrations BEFORE the new app version starts (previously this was gated
-  # behind a `migrate` profile that the documented upgrade path skipped —
-  # upgrades then ran new code against a stale schema). The `migrate` argument
-  # is recognized by the image entrypoint (docker-entrypoint.sh) and runs
-  # `prisma migrate deploy` on BOTH planes. It is idempotent, and only `up`
-  # re-runs it — a plain `docker restart`/crash respawn of the running app
-  # container still never touches the schema. Running it standalone
-  # (`docker compose run --rm migrate`, as deploy_app.sh does) remains valid.
-  #
-  # NOTE (FR-47): this job migrates the ENV-derived targets below, which is
-  # useful for pre-migrating a fresh install before the wizard runs — but the
-  # RUNNING app resolves its databases from the wizard-stored SQLite registry,
-  # which can point elsewhere (different database/schema/provider). Since
-  # FR-47 the app therefore ALSO auto-applies pending migrations at startup
-  # against its registry-resolved connections (both planes; ledger-less
-  # wizard-built schemas are auto-baselined; opt-out env AUTO_MIGRATE=off), so
-  # an upgrade no longer depends on this job guessing the app's real targets.
-  migrate:
-    image: ngmaibulat/usiem-tracker:latest
-    container_name: siem-source-tracker-migrate
-    depends_on:
-      mariadb-master:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    environment:
-      # Same base connections the app uses (see the `app` service) — the
-      # Prisma CLI (out-of-process, can't read the connection registry) needs
-      # an explicit provider selection per plane: DB_PROVIDER picks
-      # DB_MARIADB_URL for the domain plane's migrations, CONTROL_DB_PROVIDER
-      # picks DB_POSTGRES_URL (deriving the `control` schema within it) for
-      # the control plane's — giving this stack's intended domain=MariaDB /
-      # control=Postgres topology, independent of whatever the wizard actually
-      # assigns at runtime.
-      DB_POSTGRES_URL: postgresql://siem:${POSTGRES_PASSWORD:-siem_password}@postgres:5432/siem_source_tracker
-      DB_MARIADB_URL: mysql://siem:${MARIADB_PASSWORD:-siem_password}@mariadb-master:3306/siem_source_tracker
-      DB_PROVIDER: mariadb
-      CONTROL_DB_PROVIDER: postgres
-    command: ["migrate"]
-    restart: "no"
 
 volumes:
   postgres_data:
