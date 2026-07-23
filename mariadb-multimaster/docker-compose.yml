@@ -231,10 +231,11 @@ services:
   # External scheduler service (FR-46): a thin Bun trigger that polls the app's
   # /api/scheduler/config and fires due jobs (scheduled report delivery) via
   # /api/scheduler/run. It holds NO business logic, DB access, or SMTP
-  # credentials — everything runs inside the app. Requires SCHEDULER_TOKEN in
-  # .env (must match the app service's copy above); when the token is unset the
-  # container exits immediately and `unless-stopped` respawns it in a loop, so
-  # comment this service out if you don't use scheduled report delivery.
+  # credentials — everything runs inside the app. SCHEDULER_TOKEN is optional:
+  # both API routes are only reachable over this internal network (nginx blocks
+  # /api/scheduler/* on the public listener), so the token isn't required for a
+  # normal single-host deployment — set it only for defense-in-depth (must then
+  # match the app service's copy above).
   scheduler:
     image: ngmaibulat/usiem-scheduler:latest
     container_name: siem-tracker-multimaster-scheduler

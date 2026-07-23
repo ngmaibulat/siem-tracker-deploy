@@ -34,10 +34,10 @@
 #   # advisory-lock protected; opt out with AUTO_MIGRATE=off):
 #   docker compose up -d
 #
-# Required .env keys: APP_SECRET, APP_URL, TARGET_DATE, MEILI_MASTER_KEY.
+# Required .env keys: APP_SECRET, APP_URL, TARGET_DATE.
 # Optional: SNAPSHOT_TOKEN (enables the cron snapshot endpoint),
 # POSTGRES_PASSWORD, MARIADB_ROOT_PASSWORD, MARIADB_PASSWORD, MARIADB_REPL_PASSWORD,
-# MINIO_ROOT_PASSWORD.
+# MINIO_ROOT_PASSWORD, MEILI_MASTER_KEY.
 # See example.env in this folder.
 
 services:
@@ -233,9 +233,12 @@ services:
     image: getmeili/meilisearch:v1.13
     container_name: siem-source-tracker-meilisearch
     environment:
-      # MEILI_ENV=production refuses to start without a master key >= 16 bytes.
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
-      MEILI_ENV: production
+      # development mode (single-host deploy, internal-only network, never
+      # published) skips the production master-key-length check, so no
+      # MEILI_MASTER_KEY is required in .env. Set one anyway if you want
+      # Meilisearch's own request auth enabled.
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_ENV: development
       MEILI_NO_ANALYTICS: "true"
     volumes:
       - meili_data:/meili_data
@@ -344,7 +347,7 @@ services:
       # existing install — or after restoring a backup — run "Reindex now" at
       # /admin/search to index pre-existing content.
       MEILI_URL: http://meilisearch:7700
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
       # S3-compatible object storage for uploaded rich-text images (optional —
       # unset ⇒ image paste-upload disabled, editor still works). Matches the
       # minio service above; the bucket is auto-created on first upload.
@@ -380,10 +383,11 @@ services:
   # External scheduler service (FR-46): a thin Bun trigger that polls the app's
   # /api/scheduler/config and fires due jobs (scheduled report delivery) via
   # /api/scheduler/run. It holds NO business logic, DB access, or SMTP
-  # credentials — everything runs inside the app. Requires SCHEDULER_TOKEN in
-  # .env (must match the app service's copy above); when the token is unset the
-  # container exits immediately and `unless-stopped` respawns it in a loop, so
-  # comment this service out if you don't use scheduled report delivery.
+  # credentials — everything runs inside the app. SCHEDULER_TOKEN is optional:
+  # both API routes are only reachable over this internal network (nginx blocks
+  # /api/scheduler/* on the public listener), so the token isn't required for a
+  # normal single-host deployment — set it only for defense-in-depth (must then
+  # match the app service's copy above).
   scheduler:
     image: ngmaibulat/usiem-scheduler:latest
     container_name: siem-source-tracker-scheduler
